@@ -61,16 +61,16 @@ jobs:
               cat > drivers/kernelsu/Kconfig << 'EOF'
 # KernelSU configuration
 menuconfig KSU
-	tristate "KernelSU support"
-	default n
-	help
-	  KernelSU support.
+    tristate "KernelSU support"
+    default n
+    help
+      KernelSU support.
 
 if KSU
 
 config KSU_DEBUG
-	bool "KernelSU debug"
-	default n
+    bool "KernelSU debug"
+    default n
 
 endif # KSU
 EOF
@@ -80,16 +80,16 @@ EOF
             cat > drivers/kernelsu/Kconfig << 'EOF'
 # KernelSU configuration
 menuconfig KSU
-	tristate "KernelSU support"
-	default n
-	help
-	  KernelSU support.
+    tristate "KernelSU support"
+    default n
+    help
+      KernelSU support.
 
 if KSU
 
 config KSU_DEBUG
-	bool "KernelSU debug"
-	default n
+    bool "KernelSU debug"
+    default n
 
 endif # KSU
 EOF
@@ -131,16 +131,16 @@ EOF
           cat > drivers/kernelsu/Kconfig << 'EOF'
 # KernelSU configuration
 menuconfig KSU
-	tristate "KernelSU support"
-	default n
-	help
-	  KernelSU support.
+    tristate "KernelSU support"
+    default n
+    help
+      KernelSU support.
 
 if KSU
 
 config KSU_DEBUG
-	bool "KernelSU debug"
-	default n
+    bool "KernelSU debug"
+    default n
 
 endif # KSU
 EOF
@@ -180,52 +180,46 @@ EOF
 
     - name: Create build automation script
       run: |
-        # Erstelle ein robustes Build-Skript
         cat > run_build.sh << 'EOF'
 #!/bin/bash
 set -e
 
 echo "=== Starting Kernel Build ==="
 
-# Stelle sicher dass apollo.sh ausführbar ist
 chmod +x apollo.sh
 
-# Erstelle responses für nicht-interaktiven Build
+# Create responses for non-interactive build
 {
-  echo "1"      # starlte
+  echo "1"
   sleep 0.5
-  echo "3"      # clang 18
+  echo "3"
   sleep 0.5
-  echo "1"      # permissive
+  echo "1"
   sleep 0.5
-  echo "n"      # no KernelSU
+  echo "n"
   sleep 0.5
-  echo "y"      # clean build
-  sleep 2
-  # Warte auf Toolchain-Download Prompt
-  # Sende 'y' nach kurzer Zeit
   echo "y"
-  # Warte auf Build-Ende
+  sleep 2
+  echo "y"
 } | timeout 1800 ./apollo.sh 2>&1 | tee build_output.log
 
 BUILD_RESULT=$?
 
 if [ $BUILD_RESULT -eq 0 ]; then
-  echo "✅ Build script completed successfully"
+  echo "Build script completed successfully"
 elif [ $BUILD_RESULT -eq 124 ]; then
-  echo "❌ Build timed out after 30 minutes"
+  echo "Build timed out after 30 minutes"
   exit 1
 else
-  echo "⚠️ Build script exited with code: $BUILD_RESULT"
+  echo "Build script exited with code: $BUILD_RESULT"
   echo "Checking if kernel was built anyway..."
 fi
 
-# Prüfe ob Kernel erstellt wurde
 if [ -f "arch/arm64/boot/Image" ] || [ -f "Apollo/Product/"*.img ] || [ -f "Apollo/Out/"*.img ]; then
-  echo "✅ Kernel build successful!"
+  echo "Kernel build successful!"
   exit 0
 else
-  echo "❌ No kernel output found"
+  echo "No kernel output found"
   echo "=== Last 50 lines of build output ==="
   tail -50 build_output.log
   exit 1
@@ -241,52 +235,45 @@ EOF
         echo "Building with clean=$CLEAN_BUILD"
         echo "Using parameters: starlte | clang 18 | permissive | no KSU"
         
-        # Setze Umgebungsvariablen für apollo.sh
         export CR_TARGET=1
         export CR_COMPILER=3
         export CR_SELINUX=1
         export CR_KSU=n
         export CR_CLEAN=$CLEAN_BUILD
         
-        # Führe Build aus
         ./run_build.sh
 
     - name: Check build results
       run: |
         echo "=== Checking build results ==="
         
-        # Prüfe alle möglichen Output-Orte
         ANY_OUTPUT=false
         
-        # 1. Kernel Binary (Image)
         if [ -f "arch/arm64/boot/Image" ]; then
-          echo "✅ Kernel Image found:"
+          echo "Kernel Image found:"
           ls -lh arch/arm64/boot/Image
           ANY_OUTPUT=true
         fi
         
-        # 2. DTB files
         if find arch/arm64/boot/dts/ -name "*.dtb" -type f | head -1; then
-          echo "✅ DTB files found"
+          echo "DTB files found"
           ANY_OUTPUT=true
         fi
         
-        # 3. Apollo/Product/
         if [ -d "Apollo/Product" ] && ls Apollo/Product/*.img 1>/dev/null 2>&1; then
-          echo "✅ Images in Apollo/Product/:"
+          echo "Images in Apollo/Product/:"
           ls -lh Apollo/Product/*.img
           ANY_OUTPUT=true
         fi
         
-        # 4. Apollo/Out/
         if [ -d "Apollo/Out" ] && ls Apollo/Out/*.img 1>/dev/null 2>&1; then
-          echo "✅ Images in Apollo/Out/:"
+          echo "Images in Apollo/Out/:"
           ls -lh Apollo/Out/*.img
           ANY_OUTPUT=true
         fi
         
         if [ "$ANY_OUTPUT" = false ]; then
-          echo "❌ No build artifacts found!"
+          echo "No build artifacts found!"
           if [ -f "build_output.log" ]; then
             echo "=== Build log errors ==="
             grep -i "error\|fail\|stop" build_output.log | tail -20
@@ -294,7 +281,7 @@ EOF
           exit 1
         fi
         
-        echo "✅ Build completed successfully!"
+        echo "Build completed successfully!"
 
     - name: Upload artifacts
       uses: actions/upload-artifact@v4
