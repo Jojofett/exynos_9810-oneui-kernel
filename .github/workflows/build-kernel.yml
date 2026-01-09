@@ -58,7 +58,6 @@ jobs:
             echo "KernelSU Kconfig exists, checking if valid..."
             if ! grep -q "config" "drivers/kernelsu/Kconfig" 2>/dev/null; then
               echo "Creating minimal valid Kconfig..."
-              ### FIXED HERE - KEINE LEERZEILE nach EOF ###
               cat > drivers/kernelsu/Kconfig << 'EOF'
 # KernelSU configuration
 menuconfig KSU
@@ -78,7 +77,6 @@ EOF
             fi
           else
             echo "Creating KernelSU Kconfig..."
-            ### FIXED HERE - KEINE LEERZEILE nach EOF ###
             cat > drivers/kernelsu/Kconfig << 'EOF'
 # KernelSU configuration
 menuconfig KSU
@@ -130,7 +128,6 @@ EOF
         else
           echo "KernelSU directory doesn't exist, creating minimal structure..."
           mkdir -p drivers/kernelsu
-          ### FIXED HERE - KEINE LEERZEILE nach EOF ###
           cat > drivers/kernelsu/Kconfig << 'EOF'
 # KernelSU configuration
 menuconfig KSU
@@ -185,55 +182,55 @@ EOF
       run: |
         # Erstelle ein robustes Build-Skript
         cat > run_build.sh << 'EOF'
-        #!/bin/bash
-        set -e
-        
-        echo "=== Starting Kernel Build ==="
-        
-        # Stelle sicher dass apollo.sh ausführbar ist
-        chmod +x apollo.sh
-        
-        # Erstelle responses für nicht-interaktiven Build
-        {
-          echo "1"      # starlte
-          sleep 0.5
-          echo "3"      # clang 18
-          sleep 0.5
-          echo "1"      # permissive
-          sleep 0.5
-          echo "n"      # no KernelSU
-          sleep 0.5
-          echo "y"      # clean build
-          sleep 2
-          # Warte auf Toolchain-Download Prompt
-          # Sende 'y' nach kurzer Zeit
-          echo "y"
-          # Warte auf Build-Ende
-        } | timeout 1800 ./apollo.sh 2>&1 | tee build_output.log
-        
-        BUILD_RESULT=$?
-        
-        if [ $BUILD_RESULT -eq 0 ]; then
-          echo "✅ Build script completed successfully"
-        elif [ $BUILD_RESULT -eq 124 ]; then
-          echo "❌ Build timed out after 30 minutes"
-          exit 1
-        else
-          echo "⚠️ Build script exited with code: $BUILD_RESULT"
-          echo "Checking if kernel was built anyway..."
-        fi
-        
-        # Prüfe ob Kernel erstellt wurde
-        if [ -f "arch/arm64/boot/Image" ] || [ -f "Apollo/Product/"*.img ] || [ -f "Apollo/Out/"*.img ]; then
-          echo "✅ Kernel build successful!"
-          exit 0
-        else
-          echo "❌ No kernel output found"
-          echo "=== Last 50 lines of build output ==="
-          tail -50 build_output.log
-          exit 1
-        fi
-        EOF
+#!/bin/bash
+set -e
+
+echo "=== Starting Kernel Build ==="
+
+# Stelle sicher dass apollo.sh ausführbar ist
+chmod +x apollo.sh
+
+# Erstelle responses für nicht-interaktiven Build
+{
+  echo "1"      # starlte
+  sleep 0.5
+  echo "3"      # clang 18
+  sleep 0.5
+  echo "1"      # permissive
+  sleep 0.5
+  echo "n"      # no KernelSU
+  sleep 0.5
+  echo "y"      # clean build
+  sleep 2
+  # Warte auf Toolchain-Download Prompt
+  # Sende 'y' nach kurzer Zeit
+  echo "y"
+  # Warte auf Build-Ende
+} | timeout 1800 ./apollo.sh 2>&1 | tee build_output.log
+
+BUILD_RESULT=$?
+
+if [ $BUILD_RESULT -eq 0 ]; then
+  echo "✅ Build script completed successfully"
+elif [ $BUILD_RESULT -eq 124 ]; then
+  echo "❌ Build timed out after 30 minutes"
+  exit 1
+else
+  echo "⚠️ Build script exited with code: $BUILD_RESULT"
+  echo "Checking if kernel was built anyway..."
+fi
+
+# Prüfe ob Kernel erstellt wurde
+if [ -f "arch/arm64/boot/Image" ] || [ -f "Apollo/Product/"*.img ] || [ -f "Apollo/Out/"*.img ]; then
+  echo "✅ Kernel build successful!"
+  exit 0
+else
+  echo "❌ No kernel output found"
+  echo "=== Last 50 lines of build output ==="
+  tail -50 build_output.log
+  exit 1
+fi
+EOF
         
         chmod +x run_build.sh
 
