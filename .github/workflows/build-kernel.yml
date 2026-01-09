@@ -58,6 +58,7 @@ jobs:
             echo "KernelSU Kconfig exists, checking if valid..."
             if ! grep -q "config" "drivers/kernelsu/Kconfig" 2>/dev/null; then
               echo "Creating minimal valid Kconfig..."
+              ### FIXED HERE - KEINE LEERZEILE nach EOF ###
               cat > drivers/kernelsu/Kconfig << 'EOF'
 # KernelSU configuration
 menuconfig KSU
@@ -77,6 +78,7 @@ EOF
             fi
           else
             echo "Creating KernelSU Kconfig..."
+            ### FIXED HERE - KEINE LEERZEILE nach EOF ###
             cat > drivers/kernelsu/Kconfig << 'EOF'
 # KernelSU configuration
 menuconfig KSU
@@ -128,6 +130,7 @@ EOF
         else
           echo "KernelSU directory doesn't exist, creating minimal structure..."
           mkdir -p drivers/kernelsu
+          ### FIXED HERE - KEINE LEERZEILE nach EOF ###
           cat > drivers/kernelsu/Kconfig << 'EOF'
 # KernelSU configuration
 menuconfig KSU
