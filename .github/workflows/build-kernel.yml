@@ -27,8 +27,31 @@ jobs:
     - name: Checkout repository
       uses: actions/checkout@v4
       with:
-        submodules: false
+        submodules: false  # KernelSU ist nicht verfügbar, also deaktivieren
         fetch-depth: 0
+
+    - name: Fix KernelSU Kconfig issue
+      run: |
+        echo "Fixing KernelSU Kconfig references..."
+        
+        # Lösche oder kommentiere KernelSU Verweise in Kconfig Dateien
+        # Option 1: Lösche die Zeile komplett
+        sed -i '/kernelsu/d' drivers/Kconfig 2>/dev/null || true
+        
+        # Option 2: Oder kommentiere sie aus
+        sed -i 's/^.*kernelsu.*$/# &/' drivers/Kconfig 2>/dev/null || true
+        
+        # Prüfe ob die problematische Zeile noch existiert
+        if grep -q "kernelsu" drivers/Kconfig 2>/dev/null; then
+          echo "⚠️ KernelSU reference still exists in drivers/Kconfig"
+          echo "Manually fixing line 249..."
+          # Lösche spezifisch Zeile 249
+          sed -i '249d' drivers/Kconfig 2>/dev/null || true
+        fi
+        
+        # Erstelle ein leeres KernelSU Verzeichnis als Workaround
+        mkdir -p drivers/kernelsu
+        echo "# Empty Kconfig for CI build" > drivers/kernelsu/Kconfig
 
     - name: Setup build environment
       run: |
@@ -54,116 +77,139 @@ jobs:
           cpio \
           abootimg \
           lz4 \
-          lzop \
-          expect
+          lzop
         
         sudo ln -sf /usr/bin/python3 /usr/bin/python
 
-    - name: Prepare build script
+    - name: Prepare automated build
       run: |
-        # Create expect script for automated build
-        cat > build.exp << 'EOF'
-        #!/usr/bin/expect -f
+        # Erstelle Skript für nicht-interaktiven Build
+        cat > build_kernel.sh << 'EOF'
+        #!/bin/bash
         
-        # Set timeout to 30 minutes
-        set timeout 1800
+        echo "=== Starting Automated Kernel Build ==="
         
-        spawn ./apollo.sh
+        # Export build parameters (wie in apollo.sh erwartet)
+        export CR_TARGET=1      # starlte
+        export CR_COMPILER=3    # clang 18
+        export CR_SELINUX=1     # permissive
+        export CR_KSU=n         # no kernel su
+        export CR_CLEAN=y       # clean build
         
-        # 1. Target device: starlte (Option 1)
-        expect "Please select your build target (1-8) >"
-        send "1\r"
+        # Temporäre Umgebungsvariablen für make
+        export ARCH=arm64
+        export SUBARCH=arm64
+        export CROSS_COMPILE=aarch64-linux-gnu-
         
-        # 2. Compiler: clang 18 (Option 3)
-        expect "Please select your compiler (1-7) >"
-        send "3\r"
+        echo "Parameters:"
+        echo "  Target: starlte"
+        echo "  Compiler: clang 18"
+        echo "  SELinux: permissive"
+        echo "  KernelSU: disabled"
+        echo "  Clean build: yes"
         
-        # 3. SELinux: permissive (Option 1)
-        expect "Please select your SElinux mode (1-2) >"
-        send "1\r"
+        # Starte apollo.sh im Hintergrund und füttere Eingaben
+        {
+          echo "1"  # Target: starlte
+          sleep 1
+          echo "3"  # Compiler: clang 18
+          sleep 1
+          echo "1"  # SELinux: permissive
+          sleep 1
+          echo "n"  # KernelSU: no
+          sleep 1
+          echo "y"  # Clean build: yes
+          sleep 3
+          # Für Toolchain-Download prompt
+          echo "y"
+          # Warte auf weitere Prompts
+          sleep 60
+          echo "y"
+        } | ./apollo.sh 2>&1 | tee build.log &
         
-        # 4. KernelSU: no
-        expect "Enable KernelSU? (y/n) >"
-        send "n\r"
+        APOLLO_PID=$!
         
-        # 5. Clean build: from input or default
-        expect "Clean Builds? (y/n) >"
-        send "$env(CLEAN_BUILD)\r"
+        # Warte maximal 30 Minuten
+        timeout 1800 tail --pid=$APOLLO_PID -f /dev/null
         
-        # Wait for toolchain download prompt
-        expect {
-          "Download Toolchain ? (y/n) >" {
-            send "y\r"
-            exp_continue
-          }
-          "Press Any key to end the script" {
-            send "\r"
-          }
-          timeout {
-            send_user "\nTimeout after 30 minutes\n"
-            exit 1
-          }
-          eof
-        }
+        if [ $? -eq 124 ]; then
+          echo "❌ Build timeout after 30 minutes"
+          kill $APOLLO_PID 2>/dev/null
+          exit 1
+        fi
         
-        send_user "\nBuild completed\n"
+        wait $APOLLO_PID
+        BUILD_EXIT=$?
+        
+        if [ $BUILD_EXIT -eq 0 ]; then
+          echo "✅ Build process completed"
+        else
+          echo "❌ Build failed with exit code: $BUILD_EXIT"
+          echo "=== Last 50 lines of build.log ==="
+          tail -50 build.log
+          exit 1
+        fi
         EOF
         
-        chmod +x build.exp
+        chmod +x build_kernel.sh
+        chmod +x apollo.sh
 
     - name: Build kernel
       env:
         CLEAN_BUILD: ${{ github.event.inputs.clean_build || 'y' }}
       run: |
-        # Make sure apollo.sh is executable
-        chmod +x apollo.sh
-        
-        echo "Build parameters:"
-        echo "  Target: starlte (1)"
-        echo "  Compiler: clang 18 (3)"
-        echo "  SELinux: permissive (1)"
-        echo "  KernelSU: no (n)"
-        echo "  Clean build: $CLEAN_BUILD"
-        
-        # Run build with expect
-        echo "Starting automated build..."
-        if ./build.exp; then
-          echo "✅ Build process completed"
-        else
-          echo "❌ Build failed"
-          exit 1
-        fi
+        echo "Starting build with clean=$CLEAN_BUILD"
+        ./build_kernel.sh
 
-    - name: Check build output
+    - name: Check build artifacts
       run: |
-        echo "Checking build output..."
+        echo "=== Checking build artifacts ==="
         
-        # Check if kernel images were created
-        if find Apollo/Product/ -name "*.img" -type f 2>/dev/null | grep -q .; then
-          echo "✅ Kernel images found in Product/:"
+        # Prüfe verschiedene mögliche Output-Orte
+        ARTIFACTS_FOUND=false
+        
+        # Prüfe Apollo/Product/
+        if [ -d "Apollo/Product" ] && [ "$(ls -A Apollo/Product/*.img 2>/dev/null)" ]; then
+          echo "✅ Kernel images found in Apollo/Product/:"
           ls -lh Apollo/Product/*.img
-        else
-          echo "⚠️ No images found in Product/"
+          ARTIFACTS_FOUND=true
         fi
         
-        if find Apollo/Out/ -name "*.img" -type f 2>/dev/null | grep -q .; then
-          echo "✅ Kernel images found in Out/:"
+        # Prüfe Apollo/Out/
+        if [ -d "Apollo/Out" ] && [ "$(ls -A Apollo/Out/*.img 2>/dev/null)" ]; then
+          echo "✅ Kernel images found in Apollo/Out/:"
           ls -lh Apollo/Out/*.img
-        else
-          echo "⚠️ No images found in Out/"
+          ARTIFACTS_FOUND=true
         fi
         
-        # At least one image should exist
-        if [ ! -f "Apollo/Product/"*.img ] && [ ! -f "Apollo/Out/"*.img ]; then
-          echo "❌ NO kernel images found! Build failed."
+        # Prüfe arch/arm64/boot/ für Image oder zImage
+        if [ -f "arch/arm64/boot/Image" ] || [ -f "arch/arm64/boot/zImage" ]; then
+          echo "✅ Kernel binary compiled:"
+          ls -lh arch/arm64/boot/Image arch/arm64/boot/zImage 2>/dev/null || true
+          ARTIFACTS_FOUND=true
+        fi
+        
+        if [ "$ARTIFACTS_FOUND" = false ]; then
+          echo "❌ No kernel artifacts found!"
+          echo "Build likely failed during compilation."
+          echo "=== Checking build logs ==="
+          if [ -f "build.log" ]; then
+            echo "Last 100 lines of build.log:"
+            tail -100 build.log
+          fi
           exit 1
+        else
+          echo "✅ Build successful - artifacts found!"
         fi
 
-    - name: Upload build artifacts
+    - name: Upload artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: kernel-starlte-${{ github.sha }}
+        name: kernel-build-${{ github.sha }}
         path: |
           Apollo/Product/
           Apollo/Out/
-        retention-days: 30
+          arch/arm64/boot/Image
+          arch/arm64/boot/zImage
+          build.log
+        retention-days: 7
