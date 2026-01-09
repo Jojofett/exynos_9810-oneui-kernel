@@ -11,8 +11,8 @@ on:
         default: 'y'
         type: choice
         options:
-          - 'y'
-          - 'n'
+        - 'y'
+        - 'n'
 
 env:
   KERNEL_NAME: "DS-ACK"
