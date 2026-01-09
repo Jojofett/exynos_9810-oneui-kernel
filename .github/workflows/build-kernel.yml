@@ -1,5 +1,4 @@
 name: Build Kernel
-
 on:
   push:
     branches: ["4.9.337-oneui"]
@@ -11,53 +10,62 @@ on:
         default: 'y'
         type: choice
         options:
-        - 'y'
-        - 'n'
-
+          - 'y'
+          - 'n'
 env:
   KERNEL_NAME: "DS-ACK"
   KERNEL_VERSION: "V1.11"
-
 jobs:
   build-starlte:
     runs-on: ubuntu-latest
     timeout-minutes: 120
-    
     steps:
-    - name: Checkout repository
-      uses: actions/checkout@v4
-      with:
-        submodules: false
-        fetch-depth: 0
-
-    - name: Fix KernelSU issues
-      run: |
-        echo "=== Fixing KernelSU issues ==="
-        
-        # 1. Lösche oder fixe die Kconfig Referenz
-        if [ -f "drivers/Kconfig" ]; then
-          echo "Checking drivers/Kconfig for KernelSU references..."
-          if grep -q "kernelsu" drivers/Kconfig; then
-            echo "Found KernelSU reference in drivers/Kconfig"
-            echo "Removing or commenting out..."
-            # Versuche zuerst zu kommentieren
-            sed -i 's/^.*kernelsu.*$/# &/' drivers/Kconfig 2>/dev/null || true
-            # Falls immer noch da, löschen
-            sed -i '/kernelsu/d' drivers/Kconfig 2>/dev/null || true
-          else
-            echo "No KernelSU references found in drivers/Kconfig"
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: false
+          fetch-depth: 0
+      - name: Fix KernelSU issues
+        run: |
+          echo "=== Fixing KernelSU issues ==="
+          # 1. Lösche oder fixe die Kconfig Referenz
+          if [ -f "drivers/Kconfig" ]; then
+            echo "Checking drivers/Kconfig for KernelSU references..."
+            if grep -q "kernelsu" drivers/Kconfig; then
+              echo "Found KernelSU reference in drivers/Kconfig"
+              echo "Removing or commenting out..."
+              # Versuche zuerst zu kommentieren
+              sed -i 's/^.*kernelsu.*$/# &/' drivers/Kconfig 2>/dev/null || true
+              # Falls immer noch da, löschen
+              sed -i '/kernelsu/d' drivers/Kconfig 2>/dev/null || true
+            else
+              echo "No KernelSU references found in drivers/Kconfig"
+            fi
           fi
-        fi
-        
-        # 2. Prüfe ob KernelSU-Verzeichnis existiert
-        if [ -d "drivers/kernelsu" ]; then
-          echo "KernelSU directory exists, checking contents..."
-          
-          # Wenn es eine Kconfig gibt, aber sie leer/ungültig ist
-          if [ -f "drivers/kernelsu/Kconfig" ]; then
-            echo "KernelSU Kconfig exists, checking if valid..."
-            if ! grep -q "config" "drivers/kernelsu/Kconfig" 2>/dev/null; then
-              echo "Creating minimal valid Kconfig..."
+          # 2. Prüfe ob KernelSU-Verzeichnis existiert
+          if [ -d "drivers/kernelsu" ]; then
+            echo "KernelSU directory exists, checking contents..."
+            # Wenn es eine Kconfig gibt, aber sie leer/ungültig ist
+            if [ -f "drivers/kernelsu/Kconfig" ]; then
+              echo "KernelSU Kconfig exists, checking if valid..."
+              if ! grep -q "config" "drivers/kernelsu/Kconfig" 2>/dev/null; then
+                echo "Creating minimal valid Kconfig..."
+                cat > drivers/kernelsu/Kconfig << 'EOF'
+# KernelSU configuration
+menuconfig KSU
+    tristate "KernelSU support"
+    default n
+    help
+      KernelSU support.
+if KSU
+config KSU_DEBUG
+    bool "KernelSU debug"
+    default n
+endif # KSU
+EOF
+              fi
+            else
+              echo "Creating KernelSU Kconfig..."
               cat > drivers/kernelsu/Kconfig << 'EOF'
 # KernelSU configuration
 menuconfig KSU
@@ -65,18 +73,38 @@ menuconfig KSU
     default n
     help
       KernelSU support.
-
 if KSU
-
 config KSU_DEBUG
     bool "KernelSU debug"
     default n
-
 endif # KSU
 EOF
             fi
+            # Überprüfe Makefile
+            if [ ! -f "drivers/kernelsu/Makefile" ] || [ ! -s "drivers/kernelsu/Makefile" ]; then
+              echo "Creating empty Makefile..."
+              echo "# KernelSU Makefile" > drivers/kernelsu/Makefile
+              echo "obj-$(CONFIG_KSU) += kernelsu.o" >> drivers/kernelsu/Makefile
+            fi
+            # Erstelle leere Source-Datei
+            if [ ! -f "drivers/kernelsu/kernelsu.c" ]; then
+              echo "Creating dummy source file..."
+              cat > drivers/kernelsu/kernelsu.c << 'EOF'
+#include <linux/module.h>
+static int __init kernelsu_init(void){
+    return 0;
+}
+static void __exit kernelsu_exit(void){
+}
+module_init(kernelsu_init);
+module_exit(kernelsu_exit);
+MODULE_LICENSE("GPL");
+MODULE_DESCRIPTION("Dummy KernelSU module for CI");
+EOF
+            fi
           else
-            echo "Creating KernelSU Kconfig..."
+            echo "KernelSU directory doesn't exist, creating minimal structure..."
+            mkdir -p drivers/kernelsu
             cat > drivers/kernelsu/Kconfig << 'EOF'
 # KernelSU configuration
 menuconfig KSU
@@ -84,110 +112,49 @@ menuconfig KSU
     default n
     help
       KernelSU support.
-
 if KSU
-
 config KSU_DEBUG
     bool "KernelSU debug"
     default n
-
 endif # KSU
 EOF
-          fi
-          
-          # Überprüfe Makefile
-          if [ ! -f "drivers/kernelsu/Makefile" ] || [ ! -s "drivers/kernelsu/Makefile" ]; then
-            echo "Creating empty Makefile..."
             echo "# KernelSU Makefile" > drivers/kernelsu/Makefile
-            echo "obj-\$(CONFIG_KSU) += kernelsu.o" >> drivers/kernelsu/Makefile
+            echo "obj-$(CONFIG_KSU) += kernelsu.o" >> drivers/kernelsu/Makefile
           fi
-          
-          # Erstelle leere Source-Datei
-          if [ ! -f "drivers/kernelsu/kernelsu.c" ]; then
-            echo "Creating dummy source file..."
-            cat > drivers/kernelsu/kernelsu.c << 'EOF'
-// Dummy KernelSU source file for CI builds
-#include <linux/module.h>
-
-static int __init kernelsu_init(void)
-{
-    return 0;
-}
-
-static void __exit kernelsu_exit(void)
-{
-}
-
-module_init(kernelsu_init);
-module_exit(kernelsu_exit);
-
-MODULE_LICENSE("GPL");
-MODULE_DESCRIPTION("Dummy KernelSU module for CI");
-EOF
-          fi
-        else
-          echo "KernelSU directory doesn't exist, creating minimal structure..."
-          mkdir -p drivers/kernelsu
-          cat > drivers/kernelsu/Kconfig << 'EOF'
-# KernelSU configuration
-menuconfig KSU
-    tristate "KernelSU support"
-    default n
-    help
-      KernelSU support.
-
-if KSU
-
-config KSU_DEBUG
-    bool "KernelSU debug"
-    default n
-
-endif # KSU
-EOF
-          echo "# KernelSU Makefile" > drivers/kernelsu/Makefile
-          echo "obj-\$(CONFIG_KSU) += kernelsu.o" >> drivers/kernelsu/Makefile
-        fi
-        
-        echo "=== KernelSU fixes applied ==="
-
-    - name: Setup build environment
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y \
-          build-essential \
-          libncurses-dev \
-          bison \
-          flex \
-          libssl-dev \
-          libelf-dev \
-          wget \
-          curl \
-          tar \
-          unzip \
-          git \
-          bc \
-          rsync \
-          python3 \
-          python3-pip \
-          bsdiff \
-          zstd \
-          cpio \
-          abootimg \
-          lz4 \
-          lzop
-        
-        sudo ln -sf /usr/bin/python3 /usr/bin/python
-
-    - name: Create build automation script
-      run: |
-        cat > run_build.sh << 'EOF'
+          echo "=== KernelSU fixes applied ==="
+      - name: Setup build environment
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            libncurses-dev \
+            bison \
+            flex \
+            libssl-dev \
+            libelf-dev \
+            wget \
+            curl \
+            tar \
+            unzip \
+            git \
+            bc \
+            rsync \
+            python3 \
+            python3-pip \
+            bsdiff \
+            zstd \
+            cpio \
+            abootimg \
+            lz4 \
+            lzop
+          sudo ln -sf /usr/bin/python3 /usr/bin/python
+      - name: Create build automation script
+        run: |
+          cat > run_build.sh << 'EOF'
 #!/bin/bash
 set -e
-
 echo "=== Starting Kernel Build ==="
-
 chmod +x apollo.sh
-
 # Create responses for non-interactive build
 {
   echo "1"
@@ -202,9 +169,7 @@ chmod +x apollo.sh
   sleep 2
   echo "y"
 } | timeout 1800 ./apollo.sh 2>&1 | tee build_output.log
-
 BUILD_RESULT=$?
-
 if [ $BUILD_RESULT -eq 0 ]; then
   echo "Build script completed successfully"
 elif [ $BUILD_RESULT -eq 124 ]; then
@@ -214,7 +179,6 @@ else
   echo "Build script exited with code: $BUILD_RESULT"
   echo "Checking if kernel was built anyway..."
 fi
-
 if [ -f "arch/arm64/boot/Image" ] || [ -f "Apollo/Product/"*.img ] || [ -f "Apollo/Out/"*.img ]; then
   echo "Kernel build successful!"
   exit 0
@@ -225,73 +189,60 @@ else
   exit 1
 fi
 EOF
-        
-        chmod +x run_build.sh
-
-    - name: Build kernel
-      env:
-        CLEAN_BUILD: ${{ github.event.inputs.clean_build || 'y' }}
-      run: |
-        echo "Building with clean=$CLEAN_BUILD"
-        echo "Using parameters: starlte | clang 18 | permissive | no KSU"
-        
-        export CR_TARGET=1
-        export CR_COMPILER=3
-        export CR_SELINUX=1
-        export CR_KSU=n
-        export CR_CLEAN=$CLEAN_BUILD
-        
-        ./run_build.sh
-
-    - name: Check build results
-      run: |
-        echo "=== Checking build results ==="
-        
-        ANY_OUTPUT=false
-        
-        if [ -f "arch/arm64/boot/Image" ]; then
-          echo "Kernel Image found:"
-          ls -lh arch/arm64/boot/Image
-          ANY_OUTPUT=true
-        fi
-        
-        if find arch/arm64/boot/dts/ -name "*.dtb" -type f | head -1; then
-          echo "DTB files found"
-          ANY_OUTPUT=true
-        fi
-        
-        if [ -d "Apollo/Product" ] && ls Apollo/Product/*.img 1>/dev/null 2>&1; then
-          echo "Images in Apollo/Product/:"
-          ls -lh Apollo/Product/*.img
-          ANY_OUTPUT=true
-        fi
-        
-        if [ -d "Apollo/Out" ] && ls Apollo/Out/*.img 1>/dev/null 2>&1; then
-          echo "Images in Apollo/Out/:"
-          ls -lh Apollo/Out/*.img
-          ANY_OUTPUT=true
-        fi
-        
-        if [ "$ANY_OUTPUT" = false ]; then
-          echo "No build artifacts found!"
-          if [ -f "build_output.log" ]; then
-            echo "=== Build log errors ==="
-            grep -i "error\|fail\|stop" build_output.log | tail -20
+          chmod +x run_build.sh
+      - name: Build kernel
+        env:
+          CLEAN_BUILD: ${{ github.event.inputs.clean_build || 'y' }}
+        run: |
+          echo "Building with clean=$CLEAN_BUILD"
+          echo "Using parameters: starlte | clang 18 | permissive | no KSU"
+          export CR_TARGET=1
+          export CR_COMPILER=3
+          export CR_SELINUX=1
+          export CR_KSU=n
+          export CR_CLEAN=$CLEAN_BUILD
+          ./run_build.sh
+      - name: Check build results
+        run: |
+          echo "=== Checking build results ==="
+          ANY_OUTPUT=false
+          if [ -f "arch/arm64/boot/Image" ]; then
+            echo "Kernel Image found:"
+            ls -lh arch/arm64/boot/Image
+            ANY_OUTPUT=true
           fi
-          exit 1
-        fi
-        
-        echo "Build completed successfully!"
-
-    - name: Upload artifacts
-      uses: actions/upload-artifact@v4
-      with:
-        name: kernel-${{ github.sha }}
-        path: |
-          arch/arm64/boot/Image
-          arch/arm64/boot/dtb.img
-          Apollo/Product/
-          Apollo/Out/
-          build_output.log
-        retention-days: 7
-        if-no-files-found: error
+          if find arch/arm64/boot/dts/ -name "*.dtb" -type f | head -1; then
+            echo "DTB files found"
+            ANY_OUTPUT=true
+          fi
+          if [ -d "Apollo/Product" ] && ls Apollo/Product/*.img 1>/dev/null 2>&1; then
+            echo "Images in Apollo/Product/:"
+            ls -lh Apollo/Product/*.img
+            ANY_OUTPUT=true
+          fi
+          if [ -d "Apollo/Out" ] && ls Apollo/Out/*.img 1>/dev/null 2>&1; then
+            echo "Images in Apollo/Out/:"
+            ls -lh Apollo/Out/*.img
+            ANY_OUTPUT=true
+          fi
+          if [ "$ANY_OUTPUT" = false ]; then
+            echo "No build artifacts found!"
+            if [ -f "build_output.log" ]; then
+              echo "=== Build log errors ==="
+              grep -i "error\|fail\|stop" build_output.log | tail -20
+            fi
+            exit 1
+          fi
+          echo "Build completed successfully!"
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: kernel-${{ github.sha }}
+          path: |
+            arch/arm64/boot/Image
+            arch/arm64/boot/dtb.img
+            Apollo/Product/
+            Apollo/Out/
+            build_output.log
+          retention-days: 7
+          if-no-files-found: error
