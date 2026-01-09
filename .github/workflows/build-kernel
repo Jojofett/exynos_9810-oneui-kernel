@@ -1,0 +1,210 @@
+name: Build Kernel
+
+on:
+  push:
+    branches: [ "main", "master", "develop" ]
+  pull_request:
+    branches: [ "main", "master" ]
+  workflow_dispatch:  # Allows manual triggering
+    inputs:
+      clean_build:
+        description: 'Clean build?'
+        required: true
+        default: 'y'
+        type: choice
+        options:
+        - 'y'
+        - 'n'
+
+env:
+  KERNEL_NAME: "DS-ACK"
+  KERNEL_VERSION: "V1.11"
+
+jobs:
+  build-starlte:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        submodules: recursive
+        fetch-depth: 0
+
+    - name: Setup build environment
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          build-essential \
+          libncurses-dev \
+          bison \
+          flex \
+          libssl-dev \
+          libelf-dev \
+          wget \
+          curl \
+          tar \
+          unzip \
+          git \
+          bc \
+          rsync \
+          python3 \
+          python3-pip \
+          bsdiff \
+          zstd \
+          cpio \
+          abootimg \
+          lz4 \
+          lzop \
+          expect  # Für automatisierte Interaktion
+        
+        # Create symlinks for compatibility
+        sudo ln -sf /usr/bin/python3 /usr/bin/python
+
+    - name: Prepare automated build script
+      run: |
+        # Create a helper script to handle the interactive prompts
+        cat > build_kernel.sh << 'EOF'
+        #!/bin/bash
+        
+        echo "Starting automated kernel build..."
+        
+        # Set build parameters
+        export CR_TARGET=1          # starlte
+        export CR_COMPILER=3        # clang 18
+        export CR_SELINUX=1         # permissive
+        export CR_KSU=n             # no kernel su
+        export CR_CLEAN=$1          # clean build parameter
+        
+        # Run the build script with automated responses
+        # Device: 1 (starlte)
+        # Compiler: 3 (clang 18)
+        # SELinux: 1 (permissive)
+        # KernelSU: n (no)
+        # Clean: y/n (from parameter)
+        # Then 'y' for toolchain download when prompted
+        
+        echo -e "1\n3\n1\nn\n$1\n" | ./apollo.sh
+        
+        # The script will pause for toolchain download confirmation
+        # We need to handle that separately
+        EOF
+        
+        chmod +x build_kernel.sh
+        
+        # Create expect script to handle the toolchain download prompt
+        cat > auto_build.exp << 'EOF'
+        #!/usr/bin/expect -f
+        
+        set timeout 1200
+        set clean_build [lindex $argv 0]
+        
+        # Start the build script
+        spawn ./apollo.sh
+        
+        # Target device: 1 (starlte)
+        expect "Please select your build target (1-8) >"
+        send "1\r"
+        
+        # Compiler: 3 (clang 18)
+        expect "Please select your compiler (1-7) >"
+        send "3\r"
+        
+        # SELinux: 1 (permissive)
+        expect "Please select your SElinux mode (1-2) >"
+        send "1\r"
+        
+        # KernelSU: n (no)
+        expect "Enable KernelSU? (y/n) >"
+        send "n\r"
+        
+        # Clean build: from parameter
+        expect "Clean Builds? (y/n) >"
+        send "$clean_build\r"
+        
+        # Wait for potential toolchain download prompt
+        set timeout 30
+        expect {
+          "Download Toolchain ? (y/n) >" {
+            send "y\r"
+            set timeout 1200
+            exp_continue
+          }
+          timeout {
+            set timeout 1200
+            exp_continue
+          }
+          eof
+        }
+        EOF
+        
+        chmod +x auto_build.exp
+
+    - name: Build kernel
+      run: |
+        # Make apollo.sh executable
+        chmod +x apollo.sh
+        
+        # Get clean build parameter
+        CLEAN_BUILD="${{ github.event.inputs.clean_build || 'y' }}"
+        
+        echo "Building with parameters:"
+        echo "  Target: starlte (1)"
+        echo "  Compiler: clang 18 (3)"
+        echo "  SELinux: permissive (1)"
+        echo "  KernelSU: no (n)"
+        echo "  Clean build: $CLEAN_BUILD"
+        
+        # Run with expect to handle interactive prompts
+        if ./auto_build.exp "$CLEAN_BUILD"; then
+          echo "Build completed successfully!"
+        else
+          echo "Build script exited with error!"
+          exit 1
+        fi
+
+    - name: Verify and list build output
+      run: |
+        echo "Build output:"
+        find Apollo/ -name "*.img" -type f | xargs ls -la
+        find Apollo/ -name "*.zip" -type f | xargs ls -la
+        
+        # Check if build was successful
+        if [ -n "$(find Apollo/Product/ -name '*.img' -type f 2>/dev/null)" ]; then
+          echo "✅ Kernel build successful!"
+        else
+          echo "❌ No kernel image found!"
+          exit 1
+        fi
+
+    - name: Upload build artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: kernel-starlte-${{ github.sha }}
+        path: |
+          Apollo/Product/
+          Apollo/Out/
+        retention-days: 30
+        if-no-files-found: error
+
+    - name: Create build summary
+      if: always()
+      run: |
+        echo "## Build Summary" >> $GITHUB_STEP_SUMMARY
+        echo "- **Date:** $(date)" >> $GITHUB_STEP_SUMMARY
+        echo "- **Commit:** ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Target:** starlte" >> $GITHUB_STEP_SUMMARY
+        echo "- **Compiler:** clang 18" >> $GITHUB_STEP_SUMMARY
+        echo "- **SELinux:** permissive" >> $GITHUB_STEP_SUMMARY
+        echo "- **KernelSU:** disabled" >> $GITHUB_STEP_SUMMARY
+        
+        # List generated files
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### Generated Files:" >> $GITHUB_STEP_SUMMARY
+        for file in Apollo/Product/*.img Apollo/Out/*.img 2>/dev/null; do
+          if [ -f "$file" ]; then
+            size=$(du -h "$file" | cut -f1)
+            echo "- \`$(basename "$file")\` ($size)" >> $GITHUB_STEP_SUMMARY
+          fi
+        done
