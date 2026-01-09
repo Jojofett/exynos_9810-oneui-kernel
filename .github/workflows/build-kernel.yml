@@ -2,10 +2,8 @@ name: Build Kernel
 
 on:
   push:
-    branches: [ "4.9.337-oneui", "main", "master" ]
-  pull_request:
-    branches: [ "4.9.337-oneui", "main", "master" ]
-  workflow_dispatch:  # Allows manual triggering
+    branches: [ "4.9.337-oneui" ]
+  workflow_dispatch:
     inputs:
       clean_build:
         description: 'Clean build?'
@@ -29,7 +27,6 @@ jobs:
     - name: Checkout repository
       uses: actions/checkout@v4
       with:
-        # Deaktiviere Submodules wegen KernelSU-Next Problem
         submodules: false
         fetch-depth: 0
 
@@ -64,11 +61,12 @@ jobs:
 
     - name: Prepare build script
       run: |
-        # Erstelle expect Skript für automatisierte Builds
+        # Create expect script for automated build
         cat > build.exp << 'EOF'
         #!/usr/bin/expect -f
         
-        set timeout 1800  # 30 Minuten timeout
+        # Set timeout to 30 minutes
+        set timeout 1800
         
         spawn ./apollo.sh
         
@@ -88,11 +86,11 @@ jobs:
         expect "Enable KernelSU? (y/n) >"
         send "n\r"
         
-        # 5. Clean build: aus Input oder default
+        # 5. Clean build: from input or default
         expect "Clean Builds? (y/n) >"
         send "$env(CLEAN_BUILD)\r"
         
-        # Warte auf Toolchain Download Prompt
+        # Wait for toolchain download prompt
         expect {
           "Download Toolchain ? (y/n) >" {
             send "y\r"
@@ -102,13 +100,13 @@ jobs:
             send "\r"
           }
           timeout {
-            send_user "\nTimeout nach 30 Minuten\n"
+            send_user "\nTimeout after 30 minutes\n"
             exit 1
           }
           eof
         }
         
-        send_user "\nBuild abgeschlossen\n"
+        send_user "\nBuild completed\n"
         EOF
         
         chmod +x build.exp
@@ -117,46 +115,47 @@ jobs:
       env:
         CLEAN_BUILD: ${{ github.event.inputs.clean_build || 'y' }}
       run: |
-        # Stelle sicher, dass apollo.sh ausführbar ist
+        # Make sure apollo.sh is executable
         chmod +x apollo.sh
         
-        echo "Build-Parameter:"
+        echo "Build parameters:"
         echo "  Target: starlte (1)"
         echo "  Compiler: clang 18 (3)"
         echo "  SELinux: permissive (1)"
         echo "  KernelSU: no (n)"
         echo "  Clean build: $CLEAN_BUILD"
         
-        # Führe Build mit expect aus
+        # Run build with expect
+        echo "Starting automated build..."
         if ./build.exp; then
-          echo "✅ Build-Prozess abgeschlossen"
+          echo "✅ Build process completed"
         else
-          echo "❌ Build fehlgeschlagen"
+          echo "❌ Build failed"
           exit 1
         fi
 
     - name: Check build output
       run: |
-        echo "Überprüfe Build-Ausgabe..."
+        echo "Checking build output..."
         
-        # Prüfe ob Kernel-Images erstellt wurden
+        # Check if kernel images were created
         if find Apollo/Product/ -name "*.img" -type f 2>/dev/null | grep -q .; then
-          echo "✅ Kernel-Images gefunden:"
+          echo "✅ Kernel images found in Product/:"
           ls -lh Apollo/Product/*.img
         else
-          echo "⚠️ Keine Images im Product-Ordner gefunden"
+          echo "⚠️ No images found in Product/"
         fi
         
         if find Apollo/Out/ -name "*.img" -type f 2>/dev/null | grep -q .; then
-          echo "✅ Kernel-Images im Out-Ordner:"
+          echo "✅ Kernel images found in Out/:"
           ls -lh Apollo/Out/*.img
         else
-          echo "⚠️ Keine Images im Out-Ordner gefunden"
+          echo "⚠️ No images found in Out/"
         fi
         
-        # Mindestens ein Image sollte existieren
+        # At least one image should exist
         if [ ! -f "Apollo/Product/"*.img ] && [ ! -f "Apollo/Out/"*.img ]; then
-          echo "❌ KEINE Kernel-Images gefunden! Build fehlgeschlagen."
+          echo "❌ NO kernel images found! Build failed."
           exit 1
         fi
 
@@ -168,34 +167,3 @@ jobs:
           Apollo/Product/
           Apollo/Out/
         retention-days: 30
-
-    - name: Create build summary
-      if: always()
-      run: |
-        echo "## 🚀 Kernel Build Zusammenfassung" >> $GITHUB_STEP_SUMMARY
-        echo "" >> $GITHUB_STEP_SUMMARY
-        echo "**Build-Details:**" >> $GITHUB_STEP_SUMMARY
-        echo "- **Datum:** $(date '+%d.%m.%Y %H:%M:%S')" >> $GITHUB_STEP_SUMMARY
-        echo "- **Commit:** [${{ github.sha }}](https://github.com/${{ github.repository }}/commit/${{ github.sha }})" >> $GITHUB_STEP_SUMMARY
-        echo "- **Branch:** ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
-        echo "- **Target:** starlte" >> $GITHUB_STEP_SUMMARY
-        echo "- **Compiler:** clang 18" >> $GITHUB_STEP_SUMMARY
-        echo "- **SELinux:** permissive" >> $GITHUB_STEP_SUMMARY
-        echo "- **KernelSU:** deaktiviert" >> $GITHUB_STEP_SUMMARY
-        echo "" >> $GITHUB_STEP_SUMMARY
-        
-        echo "**Generierte Dateien:**" >> $GITHUB_STEP_SUMMARY
-        echo '```' >> $GITHUB_STEP_SUMMARY
-        find Apollo/ -name "*.img" -type f 2>/dev/null | xargs ls -lh 2>/dev/null >> $GITHUB_STEP_SUMMARY || echo "Keine Images gefunden" >> $GITHUB_STEP_SUMMARY
-        echo '```' >> $GITHUB_STEP_SUMMARY
-        
-        # Build-Status
-        if [ -f "Apollo/Product/"*.img ] || [ -f "Apollo/Out/"*.img ]; then
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### ✅ **Build erfolgreich!**" >> $GITHUB_STEP_SUMMARY
-          echo "Die Artefakte können unter der Registerkarte 'Artifacts' heruntergeladen werden." >> $GITHUB_STEP_SUMMARY
-        else
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### ❌ **Build fehlgeschlagen**" >> $GITHUB_STEP_SUMMARY
-          echo "Es wurden keine Kernel-Images generiert." >> $GITHUB_STEP_SUMMARY
-        fi
