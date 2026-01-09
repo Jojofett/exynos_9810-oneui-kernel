@@ -2,7 +2,7 @@ name: Build Kernel
 
 on:
   push:
-    branches: [ "4.9.337-oneui" ]
+    branches: ["4.9.337-oneui"]
   workflow_dispatch:
     inputs:
       clean_build:
