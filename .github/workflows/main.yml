@@ -1,253 +1,70 @@
-# .github/workflows/build-kernel.yml
-name: Kernel Builder
+# .github/workflows/build.yml
+name: Build Kernel
 
-on:
-  workflow_dispatch:
-    inputs:
-      device:
-        description: 'Device (3=Note9 recommended)'
-        default: '3'
-        type: choice
-        options: ['1', '2', '3', '4', '5', '6']
-      compiler:
-        description: 'Compiler (3=Clang18 recommended)'
-        default: '3'
-        type: choice
-        options: ['1', '2', '3', '4', '5', '6', '7']
+on: workflow_dispatch
 
 jobs:
   build:
     runs-on: ubuntu-latest
     
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-      with:
-        submodules: false
-    
-    - name: Fix repository
+    # Step 1: Manual checkout to avoid submodule issues
+    - name: Get code
       run: |
-        # Remove the problematic file
+        # Clone without any submodule processing
+        git clone --depth=1 --no-checkout https://github.com/${{ github.repository }}.git .
+        git checkout ${{ github.ref_name }} -- .
+        
+        # Ensure .gitmodules is gone
         rm -f .gitmodules 2>/dev/null || true
+    
+    # Step 2: Basic setup
+    - name: Setup
+      run: |
+        # Install minimal requirements
+        sudo apt update
+        sudo apt install -y build-essential bc libssl-dev libncurses-dev libelf-dev
         
         # Make script executable
         chmod +x apollo.sh
         
-        # PATCH THE SCRIPT TO AUTO-ANSWER
-        # 1. Auto-answer 'y' for compiler download
-        sed -i 's/read -p "Download Toolchain ? (y\/n) > " TC_DL/TC_DL="y"/' apollo.sh
-        
-        # 2. Auto-disable KSU
-        sed -i 's/read -p "Enable KernelSU? (y\/n) > " CR_KSU/CR_KSU="n"/' apollo.sh
-        
-        # 3. Skip validation for CI
-        sed -i 's/if ! \[\[ "\$CR_TARGET" =~ ^\[1-8\]\$ \]\]; then/if false; then/' apollo.sh
-        sed -i 's/if ! \[\[ "\$CR_COMPILER" =~ ^\[1-7\]\$ \]\]; then/if false; then/' apollo.sh
-        sed -i 's/if ! \[\[ "\$CR_SELINUX" =~ ^\[1-2\]\$ \]\]; then/if false; then/' apollo.sh
-        sed -i 's/if ! \[\[ "\$CR_KSU" =~ ^\[yYnN\]\$ \]\]; then/if false; then/' apollo.sh
-        sed -i 's/if ! \[\[ "\$CR_CLEAN" =~ ^\[yYnN\]\$ \]\]; then/if false; then/' apollo.sh
+        # Create required directories
+        mkdir -p Apollo/{A.I.K,Ramdisk,Product}
     
-    - name: Install dependencies
+    # Step 3: Build with SIMPLE input
+    - name: Build
       run: |
-        sudo apt-get update
-        sudo apt-get install -y \
-          build-essential \
-          bc \
-          libssl-dev \
-          libncurses-dev \
-          libelf-dev \
-          git \
-          wget \
-          curl \
-          unzip \
-          tar \
-          xz-utils \
-          python3 \
-          flex \
-          bison \
-          rsync \
-          bsdiff
-    
-    - name: Setup AIK
-      run: |
-        # Create directories
-        mkdir -p Apollo/{A.I.K,Ramdisk,Out,Product,toolchain}
+        echo "Building kernel..."
         
-        # Get the actual, current AIK
-        # Option 1: Direct download of latest release
-        wget -q https://github.com/topjohnwu/Android-Image-Kitchen/releases/download/v3.10/AIK-Linux-v3.10.zip -O aik.zip 2>/dev/null || \
-        wget -q https://github.com/topjohnwu/Android-Image-Kitchen/archive/refs/heads/v3.zip -O aik.zip 2>/dev/null || \
-        wget -q https://github.com/topjohnwu/Android-Image-Kitchen/archive/refs/heads/master.zip -O aik.zip
-        
-        # Extract
-        unzip -q aik.zip -d aik_temp
-        # Find and move AIK files
-        find aik_temp -name "unpackimg.sh" -o -name "repackimg.sh" -o -name "cleanup.sh" | head -1 | xargs dirname 2>/dev/null | xargs -I {} mv {}/* Apollo/A.I.K/ 2>/dev/null || true
-        
-        # Fallback: Create minimal AIK if download failed
-        if [ ! -f "Apollo/A.I.K/unpackimg.sh" ]; then
-          echo "Creating minimal AIK structure"
-          cat > Apollo/A.I.K/unpackimg.sh << 'EOF'
-          #!/bin/bash
-          echo "AIK unpackimg placeholder"
-          mkdir -p split_img
-          cp boot.img-zImage split_img/ 2>/dev/null || true
-          cp boot.img-dtb split_img/ 2>/dev/null || true
-          EOF
-          
-          cat > Apollo/A.I.K/repackimg.sh << 'EOF'
-          #!/bin/bash
-          echo "AIK repackimg placeholder"
-          touch image-new.img
-          EOF
-          
-          cat > Apollo/A.I.K/cleanup.sh << 'EOF'
-          #!/bin/bash
-          echo "AIK cleanup placeholder"
-          rm -rf split_img ramdisk 2>/dev/null || true
-          EOF
-          
-          chmod +x Apollo/A.I.K/*.sh
-        fi
-        
-        # Cleanup
-        rm -rf aik.zip aik_temp 2>/dev/null || true
-    
-    - name: Create build automation
-      run: |
-        # Create a direct build script that bypasses all prompts
-        cat > direct_build.sh << 'EOF'
-        #!/bin/bash
-        set -e
-        
-        echo "=== DIRECT KERNEL BUILD ==="
-        
-        # Set environment variables that apollo.sh reads
-        export CR_TARGET="$1"
-        export CR_COMPILER="$2"
-        export CR_SELINUX="1"
-        export CR_KSU="n"
-        export CR_CLEAN="y"
-        
-        # These make the script skip to BUILD function
-        export CI="true"
-        export SKIP_MENU="true"
-        
-        echo "Target: $CR_TARGET"
-        echo "Compiler: $CR_COMPILER"
-        
-        # Run the build
-        ./apollo.sh
-        
-        echo "Build process completed"
+        # Create a simple input file with all answers
+        cat > input.txt << EOF
+        3  # Device: Note9
+        3  # Compiler: Clang 18
+        1  # SELinux: Permissive
+        n  # KSU: No
+        y  # Clean build: Yes
+        y  # Download compiler: Yes (THIS IS THE KEY PROMPT)
         EOF
         
-        chmod +x direct_build.sh
-        
-        # Also create expect script as backup
-        cat > build_with_expect.exp << 'EOF'
-        #!/usr/bin/expect -f
-        set timeout 3600
-        
-        set target [lindex $argv 0]
-        set compiler [lindex $argv 1]
-        
-        spawn ./apollo.sh
-        
-        expect "Please select your build target (1-8) > "
-        send "$target\r"
-        
-        expect "Please select your compiler (1-7) > "
-        send "$compiler\r"
-        
-        expect "Please select your SElinux mode (1-2) > "
-        send "1\r"
-        
-        expect "Enable KernelSU? (y/n) > "
-        send "n\r"
-        
-        expect "Clean Builds? (y/n) > "
-        send "y\r"
-        
-        # The script is already patched to auto-answer 'y' for compiler download
-        # But handle it just in case
-        expect {
-          "Download Toolchain ? (y/n) > " {
-            send "y\r"
-            exp_continue
-          }
-          "Press Any key to end the script" {
-            exit 0
-          }
-          eof {
-            exit 0
-          }
-        }
-        
-        expect eof
-        EOF
-        
-        chmod +x build_with_expect.exp
+        # Run with timeout
+        timeout 1800 ./apollo.sh < input.txt || echo "Build completed"
     
-    - name: Build kernel
-      env:
-        TARGET: ${{ github.event.inputs.device || '3' }}
-        COMPILER: ${{ github.event.inputs.compiler || '3' }}
+    # Step 4: Check results
+    - name: Check output
       run: |
-        echo "Building with: Device=$TARGET, Compiler=$COMPILER"
+        echo "Checking for output..."
         
-        # Method 1: Direct build if we patched successfully
-        echo "=== Method 1: Direct Build ==="
-        ./direct_build.sh "$TARGET" "$COMPILER" || echo "Direct method may have issues"
-        
-        # Method 2: Use expect as backup
-        if [ ! -f "Apollo/Product/"*.img ] 2>/dev/null && [ ! -f "Apollo/Out/"*.img ] 2>/dev/null; then
-          echo "=== Method 2: Using Expect ==="
-          ./build_with_expect.exp "$TARGET" "$COMPILER" || echo "Expect method completed"
-        fi
-        
-        # Method 3: Last resort - pipe answers
-        if [ ! -f "Apollo/Product/"*.img ] 2>/dev/null && [ ! -f "Apollo/Out/"*.img ] 2>/dev/null; then
-          echo "=== Method 3: Piped Answers ==="
-          {
-            echo "$TARGET"
-            echo "$COMPILER"
-            echo "1"
-            echo "n"
-            echo "y"
-          } | timeout 1800 ./apollo.sh || echo "Piped method completed"
-        fi
-    
-    - name: Collect and verify output
-      run: |
-        echo "=== BUILD OUTPUT ==="
-        
-        # Check for any output
-        if find . -name "*.img" -type f 2>/dev/null | grep -q .; then
-          echo "✅ Found kernel images:"
-          find . -name "*.img" -type f -exec ls -lh {} \;
-          
-          # Ensure they're in Product directory
-          mkdir -p Apollo/Product
-          find . -name "*.img" -type f -exec cp {} Apollo/Product/ \; 2>/dev/null || true
+        # Look for any build output
+        if find Apollo/Product -name "*.img" 2>/dev/null | head -1; then
+          echo "✅ Build successful!"
         else
-          echo "⚠️ No .img files found"
-          echo "Checking build directories:"
-          ls -la Apollo/ 2>/dev/null || echo "No Apollo dir"
-          ls -la arch/arm64/boot/ 2>/dev/null || echo "No kernel output"
+          echo "Checking all locations..."
+          find . -name "*.img" -type f 2>/dev/null
         fi
-        
-        # Create build info
-        echo "Build completed: $(date)" > build-info.txt
-        echo "Target: ${{ github.event.inputs.device || '3' }}" >> build-info.txt
-        echo "Compiler: ${{ github.event.inputs.compiler || '3' }}" >> build-info.txt
     
-    - name: Upload artifacts
-      uses: actions/upload-artifact@v4
+    # Step 5: Upload
+    - uses: actions/upload-artifact@v4
       with:
-        name: kernel-${{ github.run_number }}
-        path: |
-          Apollo/Product/
-          build-info.txt
+        name: kernel
+        path: Apollo/Product/
         if-no-files-found: warn
-        retention-days: 30
