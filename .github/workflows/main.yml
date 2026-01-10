@@ -38,7 +38,7 @@ jobs:
         
         # Create a simple input file with all answers
         cat > input.txt << EOF
-        3  # Device: Note9
+        1  # Device: S9
         3  # Compiler: Clang 18
         1  # SELinux: Permissive
         n  # KSU: No
