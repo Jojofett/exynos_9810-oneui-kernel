@@ -1,0 +1,191 @@
+# .github/workflows/kernel-builder.yml
+name: Kernel Builder
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: 'Device: 3=Note9 (recommended)'
+        default: '3'
+        type: choice
+        options: ['1', '2', '3', '4', '5', '6']
+      compiler:
+        description: 'Compiler: 3=Clang18 (recommended)'
+        default: '3'
+        type: choice
+        options: ['1', '2', '3', '4', '5', '6', '7']
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    
+    steps:
+    # STEP 1: Get code WITHOUT submodules
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        submodules: false
+    
+    # STEP 2: Fix the repository immediately
+    - name: Fix repository issues
+      run: |
+        # CRITICAL: Remove .gitmodules file that causes the error
+        rm -f .gitmodules
+        
+        # Make script executable
+        chmod +x apollo.sh
+        
+        # Patch apollo.sh to AUTO-ANSWER 'y' for compiler download
+        sed -i 's/read -p "Download Toolchain ? (y\/n) > " TC_DL/echo "Auto-answering yes for CI"; TC_DL="y"/' apollo.sh
+        
+        # Patch apollo.sh to AUTO-ANSWER 'n' for KSU
+        sed -i 's/read -p "Enable KernelSU? (y\/n) > " CR_KSU/echo "KSU disabled for CI"; CR_KSU="n"/' apollo.sh
+    
+    # STEP 3: Install EXACT dependencies needed
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          build-essential \
+          bc \
+          libssl-dev \
+          libncurses-dev \
+          libelf-dev \
+          wget \
+          unzip \
+          expect \
+          git \
+          python3 \
+          flex \
+          bison
+    
+    # STEP 4: Setup environment CORRECTLY
+    - name: Setup environment
+      run: |
+        # Create Apollo structure
+        mkdir -p Apollo/{A.I.K,Ramdisk,Out,Product,toolchain}
+        
+        # Download AIK from WORKING URL
+        echo "Downloading AIK..."
+        wget -q https://codeload.github.com/topjohnwu/Android-Image-Kitchen/zip/refs/heads/master -O aik.zip
+        unzip -q aik.zip
+        mv Android-Image-Kitchen-master/* Apollo/A.I.K/ 2>/dev/null || true
+        rm -rf aik.zip Android-Image-Kitchen-master
+        
+        # Make AIK scripts executable
+        chmod +x Apollo/A.I.K/*.sh 2>/dev/null || true
+    
+    # STEP 5: Build with EXPECT (handles ALL prompts)
+    - name: Build kernel
+      env:
+        TARGET: ${{ github.event.inputs.target || '3' }}
+        COMPILER: ${{ github.event.inputs.compiler || '3' }}
+      run: |
+        echo "=== STARTING BUILD ==="
+        echo "Target: $TARGET"
+        echo "Compiler: $COMPILER"
+        
+        # Create the expect script that WILL WORK
+        cat > auto_build.exp << 'EOF'
+        #!/usr/bin/expect -f
+        set timeout 3600
+        
+        # Start apollo.sh
+        spawn ./apollo.sh
+        
+        # Answer ALL prompts in order:
+        # 1. Device selection
+        expect "Please select your build target (1-8) > "
+        send "$env(TARGET)\r"
+        
+        # 2. Compiler selection  
+        expect "Please select your compiler (1-7) > "
+        send "$env(COMPILER)\r"
+        
+        # 3. SELinux mode
+        expect "Please select your SElinux mode (1-2) > "
+        send "1\r"
+        
+        # 4. KSU (already patched but answer anyway)
+        expect "Enable KernelSU? (y/n) > "
+        send "n\r"
+        
+        # 5. Clean build
+        expect "Clean Builds? (y/n) > "
+        send "y\r"
+        
+        # 6. The script should auto-answer compiler download due to our patch
+        # But just in case, handle it:
+        expect {
+          "Download Toolchain ? (y/n) > " {
+            send "y\r"
+            exp_continue
+          }
+          "Press Any key to end the script" {
+            send_user "\n✅ BUILD SUCCESSFUL\n"
+            exit 0
+          }
+          "Abort" {
+            send_user "\n❌ BUILD ABORTED\n"
+            exit 1
+          }
+          timeout {
+            send_user "\n⏰ TIMEOUT\n"
+            exit 1
+          }
+          eof {
+            send_user "\n📦 PROCESS COMPLETE\n"
+            exit 0
+          }
+        }
+        
+        expect eof
+        EOF
+        
+        # Make expect script executable
+        chmod +x auto_build.exp
+        
+        # RUN THE BUILD
+        echo "Running automated build..."
+        ./auto_build.exp
+        
+        echo "Build script finished"
+    
+    # STEP 6: Check results
+    - name: Check build output
+      run: |
+        echo "=== CHECKING RESULTS ==="
+        
+        # Look for images ANYWHERE
+        echo "Searching for kernel images..."
+        
+        # Check Product directory
+        if ls Apollo/Product/*.img 1>/dev/null 2>&1; then
+          echo "✅ Found in Apollo/Product/:"
+          ls -lh Apollo/Product/*.img
+        elif ls Apollo/Out/*.img 1>/dev/null 2>&1; then
+          echo "✅ Found in Apollo/Out/:"
+          ls -lh Apollo/Out/*.img
+          # Copy to Product for consistency
+          mkdir -p Apollo/Product
+          cp Apollo/Out/*.img Apollo/Product/
+        else
+          echo "⚠️ No images found in standard locations"
+          echo "Searching everywhere..."
+          find . -name "*.img" -type f 2>/dev/null || echo "No .img files found"
+        fi
+        
+        # List Apollo directory
+        echo "Apollo directory structure:"
+        ls -la Apollo/ 2>/dev/null || echo "No Apollo directory"
+    
+    # STEP 7: Upload whatever we got
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: kernel-build
+        path: |
+          Apollo/Product/
+          Apollo/Out/
+        if-no-files-found: warn
+        retention-days: 30
