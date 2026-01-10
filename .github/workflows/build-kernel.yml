@@ -58,21 +58,8 @@ jobs:
             echo "KernelSU Kconfig exists, checking if valid..."
             if ! grep -q "config" "drivers/kernelsu/Kconfig" 2>/dev/null; then
               echo "Creating minimal valid Kconfig..."
-              cat > drivers/kernelsu/Kconfig < 'EOF'
+              cat > drivers/kernelsu/Kconfig << 'EOF'
 # KernelSU configuration
-menuconfig KSU
-    tristate "KernelSU support"
-    default n
-    help
-      KernelSU support.
-
-if KSU
-
-config KSU_DEBUG
-    bool "KernelSU debug"
-    default n
-
-endif # KSU
 EOF
             fi
           else
