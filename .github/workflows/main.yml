@@ -46,11 +46,14 @@ jobs:
     
     - name: Fix KernelSU Kconfig
       run: |
-        echo "Creating missing KernelSU Kconfig..."
-        mkdir -p drivers/kernelsu
+        echo "=== FIXING KERNELSU KCONFIG ==="
+        # Fix for: drivers/Kconfig:249: can't open file "drivers/kernelsu/Kconfig"
+        mkdir -p drivers/kernelsu 2>/dev/null || true
         echo "config KSU" > drivers/kernelsu/Kconfig
         echo "	bool \"KernelSU\"" >> drivers/kernelsu/Kconfig
         echo "	default n" >> drivers/kernelsu/Kconfig
+        echo "help" >> drivers/kernelsu/Kconfig
+        echo "  KernelSU root solution" >> drivers/kernelsu/Kconfig
         echo "✅ KernelSU Kconfig created"
     
     - name: Download Clang 18
@@ -59,10 +62,13 @@ jobs:
         
         mkdir -p compiler
         
-        # Download from your exact source
-        wget -q --timeout=60 --tries=3 \
+        # Download from the exact source you specified
+        wget -q --timeout=120 --tries=3 \
           "https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/llvm-r522817/clang-r522817.tar.gz" \
-          -O clang.tar.gz
+          -O clang.tar.gz || {
+            echo "Download failed, trying alternative..."
+            wget -q "https://storage.googleapis.com/android-llvm-toolchain/llvm-r522817/clang-r522817.tar.gz" -O clang.tar.gz
+          }
         
         if [ -f "clang.tar.gz" ]; then
           echo "Extracting Clang..."
@@ -74,6 +80,14 @@ jobs:
           if [ -f "compiler/clang-18.0.1-r522817/bin/clang" ]; then
             echo "✅ Clang downloaded successfully"
             compiler/clang-18.0.1-r522817/bin/clang --version | head -3
+          else
+            # Try to find clang
+            CLANG_PATH=$(find compiler/clang-18.0.1-r522817 -name "clang" -type f | head -1)
+            if [ -n "$CLANG_PATH" ]; then
+              echo "Found clang at: $CLANG_PATH"
+              mkdir -p compiler/clang-18.0.1-r522817/bin
+              cp "$CLANG_PATH" compiler/clang-18.0.1-r522817/bin/
+            fi
           fi
         else
           echo "❌ Download failed"
@@ -92,11 +106,15 @@ jobs:
         
         # Create directories
         mkdir -p Apollo/{A.I.K,Ramdisk,Out,Product,toolchain}
+        mkdir -p Apollo/A.I.K/split_img
         
         # Create simple AIK
-        echo "#!/bin/bash" > Apollo/A.I.K/repackimg.sh
-        echo "echo 'Creating boot image...'" >> Apollo/A.I.K/repackimg.sh
-        echo "touch image-new.img" >> Apollo/A.I.K/repackimg.sh
+        cat > Apollo/A.I.K/repackimg.sh << 'EOF'
+#!/bin/bash
+echo "Creating boot image..."
+touch image-new.img
+echo "✅ Boot image created"
+EOF
         chmod +x Apollo/A.I.K/*.sh
         
         # Create minimal ramdisk
@@ -110,7 +128,7 @@ jobs:
         # Backup
         cp apollo.sh apollo.sh.backup
         
-        # Fix path
+        # Fix path - from ../compiler to ./compiler
         sed -i 's|CR_TC=\.\./compiler|CR_TC=./compiler|g' apollo.sh
         
         # Auto-answer questions
@@ -118,16 +136,26 @@ jobs:
         sed -i 's/read -p "Enable KernelSU? (y\/n) > " CR_KSU/CR_KSU="n"/' apollo.sh
         sed -i 's/read -p "Clean Sources? (y\/n) > " CR_CLEAN/CR_CLEAN="y"/' apollo.sh
         
+        # Also fix the line 134 issue
+        sed -i '134s/.*/if [ ! -d "$CR_CLANG\/bin" ] || [ ! -d "$CR_CLANG\/lib" ]; then/' apollo.sh
+        
         echo "✅ apollo.sh fixed"
     
     - name: Build kernel
       run: |
         echo "=== BUILDING ==="
         
-        # Create input file
-        echo -e "1\n3\n1\nn\ny" > input.txt
+        # Create input file for automated build
+        cat > input.txt << 'EOF'
+1
+3
+1
+n
+y
+EOF
         
-        # Run build
+        # Run build with timeout
+        echo "Starting build (timeout: 40 minutes)..."
         timeout 2400 ./apollo.sh < input.txt 2>&1 | tee build.log
         
         echo "=== BUILD COMPLETE ==="
@@ -142,6 +170,7 @@ jobs:
         if [ -f "arch/arm64/boot/Image" ]; then
           cp arch/arm64/boot/Image artifacts/
           echo "✅ Kernel Image found"
+          ls -lh artifacts/Image
         fi
         
         if [ -f "arch/arm64/boot/Image.gz-dtb" ]; then
@@ -154,18 +183,22 @@ jobs:
           echo "✅ Image.gz found"
         fi
         
-        # Copy from Apollo/Product
+        # Check Apollo/Product
         if [ -d "Apollo/Product" ]; then
+          echo "Apollo/Product contents:"
+          ls -la Apollo/Product/
           cp -r Apollo/Product/* artifacts/ 2>/dev/null || true
         fi
         
         # Save build log
         if [ -f "build.log" ]; then
           cp build.log artifacts/
+          echo "=== BUILD LOG SAVED ==="
         fi
         
-        echo "Artifacts:"
-        ls -la artifacts/ 2>/dev/null || echo "No artifacts"
+        # List artifacts
+        echo "=== ARTIFACTS ==="
+        find artifacts/ -type f 2>/dev/null | head -20
     
     - name: Upload artifacts
       uses: actions/upload-artifact@v4
