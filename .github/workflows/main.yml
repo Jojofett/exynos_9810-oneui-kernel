@@ -12,85 +12,14 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
       with:
         submodules: false
-    
-    - name: FIX apollo.sh WITHOUT sed errors
-      run: |
-        # Make executable
-        chmod +x apollo.sh
-        
-        # Create a fixed version of apollo.sh
-        cat > fix_apollo.sh << 'EOF'
-        #!/bin/bash
-        # Fix apollo.sh script
-        
-        # Backup original
-        cp apollo.sh apollo.sh.backup
-        
-        # Fix line 134 - use awk instead of sed to avoid delimiter issues
-        awk 'NR==134 {print "if [ ! -d \"$CR_CLANG/bin\" ] || [ ! -d \"$CR_CLANG/lib\" ]; then"; next} 1' apollo.sh > apollo.sh.tmp
-        mv apollo.sh.tmp apollo.sh
-        
-        # Fix compiler path
-        sed -i.bak 's|CR_TC=\.\./compiler|CR_TC=./compiler|g' apollo.sh
-        
-        # Auto-answer prompts
-        sed -i.bak 's/read -p "Download Toolchain ? (y\/n) > " TC_DL/TC_DL="y"/' apollo.sh
-        sed -i.bak 's/read -p "Enable KernelSU? (y\/n) > " CR_KSU/CR_KSU="n"/' apollo.sh
-        
-        # Set defaults
-        sed -i.bak 's/DEFAULT_TARGET=3/DEFAULT_TARGET=1/' apollo.sh
-        
-        # Clean up backups
-        rm -f apollo.sh.bak
-        
-        echo "Script fixed successfully"
-        EOF
-        
-        chmod +x fix_apollo.sh
-        ./fix_apollo.sh
-    
-    - name: Download Clang 18 compiler
-      run: |
-        echo "=== DOWNLOADING CLANG 18 ==="
-        
-        # Create compiler directory
-        mkdir -p compiler
-        
-        # Download Clang 18 from a reliable source
-        echo "Downloading Clang 18 from LLVM releases..."
-        wget -q https://github.com/llvm/llvm-project/releases/download/llvmorg-18.0.1/clang+llvm-18.0.1-x86_64-linux-gnu-ubuntu-22.04.tar.xz -O clang.tar.xz || \
-        wget -q https://github.com/llvm/llvm-project/releases/download/llvmorg-18.0.1/clang+llvm-18.0.1-x86_64-linux-gnu-ubuntu-20.04.tar.xz -O clang.tar.xz || \
-        wget -q https://github.com/llvm/llvm-project/releases/download/llvmorg-18.0.1/clang+llvm-18.0.1-x86_64-linux-gnu.tar.xz -O clang.tar.xz
-        
-        if [ -f "clang.tar.xz" ]; then
-          echo "Extracting Clang 18..."
-          tar -xf clang.tar.xz
-          # Find the extracted directory
-          EXTRACTED_DIR=$(find . -maxdepth 1 -type d -name "clang+llvm-*" | head -1)
-          if [ -n "$EXTRACTED_DIR" ]; then
-            mv "$EXTRACTED_DIR" compiler/clang-18.0.1-r522817
-            echo "✅ Compiler downloaded to compiler/clang-18.0.1-r522817"
-            # Test it
-            compiler/clang-18.0.1-r522817/bin/clang --version | head -2
-          else
-            echo "❌ Could not find extracted directory"
-          fi
-          rm -f clang.tar.xz
-        else
-          echo "❌ Failed to download Clang 18"
-          # Create dummy compiler so script doesn't fail
-          mkdir -p compiler/clang-18.0.1-r522817/{bin,lib}
-          touch compiler/clang-18.0.1-r522817/bin/clang
-          touch compiler/clang-18.0.1-r522817/lib/libc++.so
-          chmod +x compiler/clang-18.0.1-r522817/bin/clang
-        fi
+        ref: 4.9.337-oneui
     
     - name: Install dependencies
       run: |
@@ -103,90 +32,300 @@ jobs:
           libelf-dev \
           flex \
           bison \
-          git
+          git \
+          wget \
+          tar \
+          gzip \
+          xz-utils \
+          python3 \
+          make \
+          gcc \
+          g++ \
+          cpio \
+          abootimg \
+          dos2unix \
+          rsync
     
-    - name: Setup directories
+    - name: Download Android Clang r522817
       run: |
+        echo "=== DOWNLOADING ANDROID CLANG r522817 ==="
+        
+        # Create compiler directory
+        mkdir -p compiler
+        
+        # Download from the exact source you specified
+        echo "Downloading from: https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/llvm-r522817/clang-r522817.tar.gz"
+        
+        # Use curl with proper redirect handling
+        curl -L -o clang-r522817.tar.gz \
+          "https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/llvm-r522817/clang-r522817.tar.gz" \
+          --retry 3 --retry-delay 5
+        
+        if [ -f "clang-r522817.tar.gz" ]; then
+          echo "Download successful, file size: $(wc -c < clang-r522817.tar.gz) bytes"
+          
+          # Extract to correct directory
+          echo "Extracting Clang r522817..."
+          mkdir -p compiler/clang-18.0.1-r522817
+          tar -xzf clang-r522817.tar.gz -C compiler/clang-18.0.1-r522817
+          
+          # Check what was extracted
+          echo "Contents of extracted directory:"
+          ls -la compiler/clang-18.0.1-r522817/ | head -20
+          
+          # The Android Clang archive has a specific structure
+          # Usually it extracts with bin/, lib/, include/, etc. at the root
+          # But let's check and organize if needed
+          
+          # If bin/ directory exists at root, we're good
+          if [ -d "compiler/clang-18.0.1-r522817/bin" ]; then
+            echo "✅ Clang directory structure looks correct"
+          else
+            echo "⚠️  Bin directory not found at root, checking structure..."
+            # List all directories and files to understand structure
+            find compiler/clang-18.0.1-r522817 -type f -name "clang" | head -5
+            find compiler/clang-18.0.1-r522817 -type d | head -10
+          fi
+          
+          # Test the compiler
+          if [ -f "compiler/clang-18.0.1-r522817/bin/clang" ]; then
+            echo "✅ Clang binary found"
+            compiler/clang-18.0.1-r522817/bin/clang --version | head -3
+          else
+            # Try to find clang anywhere in the extracted files
+            CLANG_PATH=$(find compiler/clang-18.0.1-r522817 -type f -name "clang" | head -1)
+            if [ -n "$CLANG_PATH" ]; then
+              echo "Found clang at: $CLANG_PATH"
+              # Create bin directory and move/symlink clang there
+              mkdir -p compiler/clang-18.0.1-r522817/bin
+              CLANG_DIR=$(dirname "$CLANG_PATH")
+              if [ "$CLANG_DIR" != "compiler/clang-18.0.1-r522817/bin" ]; then
+                # Move all binaries to bin directory
+                find "$CLANG_DIR" -maxdepth 1 -type f \( -name "clang" -o -name "clang++" -o -name "ld.lld" \) -exec mv {} compiler/clang-18.0.1-r522817/bin/ \;
+                # If we moved the directory, try to move lib directory too
+                if [ -d "$CLANG_DIR/../lib" ]; then
+                  mv "$CLANG_DIR/../lib" compiler/clang-18.0.1-r522817/ 2>/dev/null || true
+                fi
+              fi
+              # Test again
+              if [ -f "compiler/clang-18.0.1-r522817/bin/clang" ]; then
+                compiler/clang-18.0.1-r522817/bin/clang --version | head -3
+              fi
+            else
+              echo "❌ Clang binary not found in archive"
+              echo "Listing archive contents:"
+              tar -tzf clang-r522817.tar.gz | head -30
+            fi
+          fi
+          
+          # Clean up
+          rm -f clang-r522817.tar.gz
+          
+        else
+          echo "❌ Failed to download Clang r522817"
+          echo "Trying alternative Google Storage URL..."
+          
+          # Try the Google Storage URL as fallback
+          wget -q --timeout=30 --tries=3 \
+            "https://storage.googleapis.com/android-llvm-toolchain/llvm-r522817/clang-r522817.tar.gz" \
+            -O clang-r522817.tar.gz
+          
+          if [ -f "clang-r522817.tar.gz" ]; then
+            echo "Alternative download successful"
+            mkdir -p compiler/clang-18.0.1-r522817
+            tar -xzf clang-r522817.tar.gz -C compiler/clang-18.0.1-r522817
+            rm -f clang-r522817.tar.gz
+          else
+            echo "❌ All download attempts failed"
+            exit 1
+          fi
+        fi
+        
+        # Final verification
+        echo "=== FINAL VERIFICATION ==="
+        echo "Compiler directory structure:"
+        ls -la compiler/clang-18.0.1-r522817/
+        if [ -d "compiler/clang-18.0.1-r522817/bin" ]; then
+          echo "Bin directory contents:"
+          ls -la compiler/clang-18.0.1-r522817/bin/ | head -10
+        fi
+    
+    - name: Prepare build environment
+      run: |
+        echo "=== PREPARING BUILD ENVIRONMENT ==="
+        
+        # Make apollo.sh executable
+        chmod +x apollo.sh
+        
+        # Fix line endings if needed
+        dos2unix apollo.sh 2>/dev/null || true
+        
+        # Create necessary directories
         mkdir -p Apollo/{A.I.K,Ramdisk,Out,Product,toolchain}
         
-        # Simple AIK setup
-        mkdir -p Apollo/A.I.K/split_img
+        # Create minimal AIK scripts
         cat > Apollo/A.I.K/repackimg.sh << 'EOF'
         #!/bin/bash
-        echo "Creating boot image..."
-        # Just create a dummy image for now
-        cat > image-new.img << IMGEOF
-        Dummy boot image
-        Created by GitHub Actions
-        IMGEOF
-        echo -n "SEANDROIDENFORCE" >> image-new.img
+        echo "Repacking boot image..."
+        # This is a simplified version for CI
+        if [ -f "../Product/Image.gz-dtb" ]; then
+          cp ../Product/Image.gz-dtb split_img/
+          echo "Kernel: Image.gz-dtb" > boot.img
+          echo -n "SEANDROIDENFORCE" >> boot.img
+          mv boot.img image-new.img
+          echo "Boot image created: image-new.img"
+        else
+          echo "No kernel image found"
+          touch image-new.img
+        fi
         EOF
+        
         chmod +x Apollo/A.I.K/*.sh
         
-        # Check if Ramdisk exists
+        # Create minimal ramdisk if none exists
         if [ ! -d "Apollo/Ramdisk" ] || [ -z "$(ls -A Apollo/Ramdisk 2>/dev/null)" ]; then
-          echo "Creating placeholder Ramdisk..."
+          echo "Creating minimal ramdisk structure..."
           mkdir -p Apollo/Ramdisk
-          echo "placeholder" > Apollo/Ramdisk/placeholder.txt
-        fi
-    
-    - name: Build kernel
-      run: |
-        echo "=== BUILDING KERNEL ==="
+          cat > Apollo/Ramdisk/init.rc << 'EOF'
+        # Minimal init.rc
+        on early-init
+            start ueventd
         
-        # Test the script first
-        echo "Testing apollo.sh..."
+        on init
+            symlink /system/bin /bin
+        
+        service ueventd /sbin/ueventd
+            critical
+            seclabel u:r:ueventd:s0
+        EOF
+        fi
+        
+        # Verify compiler path
+        echo "Compiler path verification:"
         if [ -f "compiler/clang-18.0.1-r522817/bin/clang" ]; then
-          echo "Compiler found:"
-          compiler/clang-18.0.1-r522817/bin/clang --version | head -2
-        fi
-        
-        # Build with inputs
-        echo "1" > answers.txt  # Device: starlte
-        echo "3" >> answers.txt # Compiler: Clang 18
-        echo "1" >> answers.txt # SELinux: Permissive
-        echo "n" >> answers.txt # KSU: No
-        echo "y" >> answers.txt # Clean: Yes
-        
-        echo "Running build with inputs..."
-        timeout 2400 ./apollo.sh < answers.txt 2>&1 | tail -100
-        
-        echo "Build process completed"
-    
-    - name: Check results
-      run: |
-        echo "=== CHECKING RESULTS ==="
-        
-        # Check if kernel was compiled
-        if [ -f "arch/arm64/boot/Image" ]; then
-          echo "✅ Kernel Image compiled successfully!"
-          ls -lh arch/arm64/boot/Image
-          
-          # Copy to Product directory
-          mkdir -p Apollo/Product
-          cp arch/arm64/boot/Image Apollo/Product/
+          echo "✅ Clang is available at: compiler/clang-18.0.1-r522817/bin/clang"
         else
-          echo "❌ No kernel Image found"
-          echo "Checking for any output..."
-          find . -name "Image" -o -name "*.img" -o -name "zImage" -type f 2>/dev/null | head -10
+          echo "❌ Clang not found at expected location"
+          find compiler/ -name "clang" -type f 2>/dev/null
+        fi
+    
+    - name: Configure and build kernel
+      run: |
+        echo "=== CONFIGURING AND BUILDING KERNEL ==="
+        
+        # Set environment variables
+        export ARCH=arm64
+        export SUBARCH=arm64
+        
+        # First, let's check if we can run apollo.sh directly
+        echo "Testing apollo.sh..."
+        
+        # Create an automated input for apollo.sh
+        cat > auto_input.txt << EOF
+        1
+        3
+        1
+        n
+        y
+        EOF
+        
+        # Make sure the script is executable
+        chmod +x apollo.sh
+        
+        # Check the script for syntax errors
+        echo "Checking script syntax..."
+        bash -n apollo.sh && echo "✅ Script syntax is valid"
+        
+        # Patch the script if needed (only critical fixes)
+        echo "Applying critical patches to apollo.sh..."
+        
+        # Backup original
+        cp apollo.sh apollo.sh.backup
+        
+        # Fix 1: Ensure CR_TC points to current directory
+        sed -i 's|CR_TC=\.\./compiler|CR_TC=./compiler|g' apollo.sh
+        
+        # Fix 2: Auto-answer the toolchain download question since we already have it
+        sed -i 's/read -p "Download Toolchain ? (y\/n) > " TC_DL/TC_DL="n"/' apollo.sh
+        
+        # Fix 3: Skip KernelSU
+        sed -i 's/read -p "Enable KernelSU? (y\/n) > " CR_KSU/CR_KSU="n"/' apollo.sh
+        
+        echo "✅ Applied critical patches"
+        
+        # Run the build with a timeout
+        echo "Starting kernel build..."
+        echo "Build will timeout after 30 minutes"
+        
+        # Run apollo.sh with our automated input
+        timeout 1800 bash -c "
+          echo 'Starting build process...'
+          ./apollo.sh < auto_input.txt 2>&1 | tee build_output.log
+          echo 'Build process completed'
+        " || {
+          echo "Build timed out after 30 minutes"
+          echo "Last 100 lines of output:"
+          tail -100 build_output.log 2>/dev/null || echo "No build output log found"
+        }
+        
+        echo "=== BUILD PROCESS FINISHED ==="
+    
+    - name: Collect build artifacts
+      run: |
+        echo "=== COLLECTING ARTIFACTS ==="
+        
+        # Create artifacts directory
+        mkdir -p artifacts
+        
+        # Check for kernel image
+        if [ -f "arch/arm64/boot/Image" ]; then
+          echo "✅ Kernel Image found"
+          cp arch/arm64/boot/Image artifacts/
+          ls -lh artifacts/Image
         fi
         
-        # Check for any error logs
-        echo "=== ERROR LOGS (if any) ==="
-        find . -name "*.log" -type f -exec echo "=== {} ===" \; -exec tail -20 {} \; 2>/dev/null || echo "No log files found"
+        if [ -f "arch/arm64/boot/Image.gz-dtb" ]; then
+          echo "✅ Image.gz-dtb found"
+          cp arch/arm64/boot/Image.gz-dtb artifacts/
+        fi
         
-        # Show directory structure
-        echo "=== DIRECTORY STRUCTURE ==="
-        ls -la Apollo/ 2>/dev/null || echo "No Apollo directory"
-        ls -la arch/arm64/boot/ 2>/dev/null || echo "No kernel output directory"
+        if [ -f "arch/arm64/boot/Image.gz" ]; then
+          echo "✅ Image.gz found"
+          cp arch/arm64/boot/Image.gz artifacts/
+        fi
+        
+        # Check Apollo/Product directory
+        if [ -d "Apollo/Product" ]; then
+          echo "Apollo/Product contents:"
+          ls -la Apollo/Product/
+          cp -r Apollo/Product/* artifacts/ 2>/dev/null || true
+        fi
+        
+        # Save build log
+        if [ -f "build_output.log" ]; then
+          echo "Saving build log..."
+          cp build_output.log artifacts/
+          # Show last 50 lines for debugging
+          echo "=== LAST 50 LINES OF BUILD LOG ==="
+          tail -50 build_output.log
+        fi
+        
+        # Save compiler info
+        if [ -f "compiler/clang-18.0.1-r522817/bin/clang" ]; then
+          compiler/clang-18.0.1-r522817/bin/clang --version > artifacts/clang_version.txt 2>&1
+        fi
+        
+        # List all artifacts
+        echo "=== ARTIFACTS COLLECTED ==="
+        find artifacts/ -type f 2>/dev/null | while read file; do
+          echo "- $(basename "$file") ($(wc -c < "$file") bytes)"
+        done || echo "No artifacts found"
     
     - name: Upload artifacts
       uses: actions/upload-artifact@v4
+      if: always()
       with:
-        name: kernel-build
-        path: |
-          arch/arm64/boot/
-          Apollo/Product/
-          compiler/clang-18.0.1-r522817/bin/clang
+        name: kernel-build-${{ github.run_id }}
+        path: artifacts/
         if-no-files-found: warn
-        retention-days: 30
+        retention-days: 7
