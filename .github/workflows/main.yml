@@ -28,11 +28,9 @@ jobs:
     - name: Fix KernelSU
       run: |
         mkdir -p drivers/kernelsu
-        cat > drivers/kernelsu/Kconfig << 'EOF'
-config KSU
-	bool "KernelSU"
-	default n
-EOF
+        echo 'config KSU' > drivers/kernelsu/Kconfig
+        echo '	bool "KernelSU"' >> drivers/kernelsu/Kconfig
+        echo '	default n' >> drivers/kernelsu/Kconfig
     
     - name: Download Clang
       run: |
