@@ -37,11 +37,27 @@ jobs:
     - name: Download Clang
       run: |
         mkdir -p compiler
-        wget -q "https://storage.googleapis.com/android-llvm-toolchain/llvm-r522817/clang-r522817.tar.gz" -O clang.tar.gz
-        if [ -f "clang.tar.gz" ]; then
-          mkdir -p compiler/clang-18.0.1-r522817
-          tar -xzf clang.tar.gz -C compiler/clang-18.0.1-r522817
+        echo "Lade Clang von googlesource herunter..."
+        wget -q --tries=3 --timeout=60 --retry-connrefused \
+          "https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/llvm-r522817/clang-r522817.tar.gz" \
+          -O clang.tar.gz
+        
+        if [ ! -f "clang.tar.gz" ]; then
+          echo "FEHLER: Clang-Download fehlgeschlagen!"
+          exit 1
+        fi
+        
+        echo "Entpacke Clang..."
+        mkdir -p compiler/clang-18.0.1-r522817
+        tar -xzf clang.tar.gz -C compiler/clang-18.0.1-r522817
+        
+        # Prüfe, ob Entpacken erfolgreich war
+        if [ $? -eq 0 ]; then
+          echo "Clang erfolgreich entpackt"
           rm clang.tar.gz
+        else
+          echo "FEHLER: Clang konnte nicht entpackt werden!"
+          exit 1
         fi
     
     - name: Setup
