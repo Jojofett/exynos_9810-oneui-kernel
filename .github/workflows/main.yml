@@ -27,6 +27,8 @@ jobs:
     
     - name: Fix KernelSU
       run: |
+        # Lösche die Datei/Verzeichnis wenn es existiert, dann erstelle neu
+        rm -rf drivers/kernelsu 2>/dev/null || true
         mkdir -p drivers/kernelsu
         echo 'config KSU' > drivers/kernelsu/Kconfig
         echo '	bool "KernelSU"' >> drivers/kernelsu/Kconfig
