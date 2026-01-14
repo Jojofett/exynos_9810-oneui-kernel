@@ -3962,7 +3962,7 @@ static int decon_probe(struct platform_device *pdev)
 	if (ret)
 		goto err_pinctrl;
 
-	ret = decon_create_debugfs(decon);
+	decon_create_debugfs(decon);
 	if (ret)
 		goto err_pinctrl;
 
