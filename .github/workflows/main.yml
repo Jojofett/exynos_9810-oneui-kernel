@@ -9,7 +9,7 @@ on:
         type: choice
         options: ['1', '2', '3', '4', '5', '6']
       compiler:
-        description: 'Compiler choice (matches Apollo.sh options)'
+        description: 'Compiler choice (1-8)'
         default: '3'
         type: choice
         options: ['1', '2', '3', '4', '5', '6', '7', '8']
@@ -43,7 +43,7 @@ jobs:
     - name: Install deps
       run: |
         sudo apt update
-        sudo apt install -y build-essential bc libssl-dev libncurses-dev libelf-dev flex bison git wget tar xz-utils python3 make gcc g++ cpio abootimg dos2unix zstd
+        sudo apt install -y build-essential bc libssl-dev libncurses-dev libelf-dev flex bison git wget tar xz-utils python3 make gcc g++ cpio abootimg dos2unix zstd expect bsdiff
     
     - name: Fix KernelSU
       run: |
@@ -53,34 +53,118 @@ jobs:
         echo '	bool "KernelSU"' >> drivers/kernelsu/Kconfig
         echo '	default n' >> drivers/kernelsu/Kconfig
     
-    - name: Setup
+    - name: Setup directories
       run: |
         chmod +x apollo.sh
         dos2unix apollo.sh 2>/dev/null || true
         mkdir -p Apollo/{A.I.K,Ramdisk,Out,Product,toolchain}
+        mkdir -p compiler
+        
+        # Create minimal A.I.K scripts
         echo "#!/bin/bash" > Apollo/A.I.K/repackimg.sh
-        echo "touch image-new.img" >> Apollo/A.I.K/repackimg.sh
+        echo 'echo "Creating dummy image"' >> Apollo/A.I.K/repackimg.sh
+        echo 'dd if=/dev/zero of=image-new.img bs=1M count=10 2>/dev/null' >> Apollo/A.I.K/repackimg.sh
+        echo 'exit 0' >> Apollo/A.I.K/repackimg.sh
         chmod +x Apollo/A.I.K/repackimg.sh
+        
+        echo "#!/bin/bash" > Apollo/A.I.K/cleanup.sh
+        echo 'echo "Cleaning up"' >> Apollo/A.I.K/cleanup.sh
+        echo 'rm -f split_img/* image-new.img 2>/dev/null' >> Apollo/A.I.K/cleanup.sh
+        chmod +x Apollo/A.I.K/cleanup.sh
+        
+        mkdir -p Apollo/A.I.K/split_img
     
-    - name: Patch apollo.sh
+    - name: Patch apollo.sh for non-interactive mode
       run: |
+        # Disable all read prompts and set defaults automatically
+        sed -i 's/read -p "Download Toolchain ? (y\/n) > " TC_DL/TC_DL="y"/' apollo.sh
+        sed -i 's/read -p "Enable KernelSU? (y\/n) > " CR_KSU/# CR_KSU already set/' apollo.sh
+        sed -i 's/read -p "Clean Builds? (y\/n) > " CR_CLEAN/# CR_CLEAN already set/' apollo.sh
+        sed -i 's/read -p "Build Flashable ZIP ? (y\/n) > " CR_MKZIP/CR_MKZIP="n"/' apollo.sh
+        
+        # Fix path issues
         sed -i 's|CR_TC=\.\./compiler|CR_TC=./compiler|g' apollo.sh
         sed -i 's|CR_TC=../toolchain|CR_TC=./Apollo/toolchain|g' apollo.sh
+        
+        # Force TERM variable
+        echo 'export TERM=xterm' >> apollo.sh
     
-    - name: Create compiler directories
+    - name: Pre-download selected compiler
       run: |
-        mkdir -p compiler
-        mkdir -p Apollo/toolchain/clang-custom
+        COMPILER=${{ github.event.inputs.compiler }}
+        echo "Pre-downloading compiler $COMPILER..."
+        
+        case $COMPILER in
+          1)
+            URL="https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/llvm-r416183/clang-r416183.tar.gz"
+            DIR="clang-12.0.4-r416183"
+            ;;
+          2)
+            URL="https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/llvm-r450784/clang-r450784b.tar.gz"
+            DIR="clang-14.0.4-r450784"
+            ;;
+          3)
+            URL="https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/llvm-r522817/clang-r522817.tar.gz"
+            DIR="clang-18.0.1-r522817"
+            ;;
+          4)
+            URL="https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/main/clang-r547379.tar.gz"
+            DIR="clang-20.0.0-r547379"
+            ;;
+          5)
+            URL="https://github.com/Neutron-Toolchains/clang-build-catalogue/releases/download/05012024/neutron-clang-05012024.tar.zst"
+            DIR="neutron-clang-18.0.0"
+            ;;
+          6)
+            URL="https://github.com/Neutron-Toolchains/clang-build-catalogue/releases/download/10032024/neutron-clang-10032024.tar.zst"
+            DIR="neutron-clang-19.0.0"
+            ;;
+          7|8)
+            echo "Compiler $COMPILER needs manual setup or is custom"
+            mkdir -p compiler/$DIR 2>/dev/null || true
+            exit 0
+            ;;
+        esac
+        
+        # Download compiler
+        if [ ! -d "compiler/$DIR/bin" ]; then
+          echo "Downloading $DIR from $URL"
+          mkdir -p compiler/$DIR
+          
+          if [[ $URL == *".tar.zst" ]]; then
+            wget -q --show-progress "$URL" -O compiler.tar.zst
+            tar --use-compress-program=unzstd -xf compiler.tar.zst -C compiler/$DIR
+            rm -f compiler.tar.zst
+            
+            # Apply Neutron patches if needed
+            if [[ $COMPILER == "5" ]] || [[ $COMPILER == "6" ]]; then
+              cd compiler/$DIR
+              wget -q https://raw.githubusercontent.com/Neutron-Toolchains/antman/main/antman
+              chmod +x antman
+              ./antman --patch=glibc || true
+              cd -
+            fi
+          else
+            wget -q --show-progress "$URL" -O compiler.tar.gz
+            tar -xzf compiler.tar.gz -C compiler/$DIR
+            rm -f compiler.tar.gz
+          fi
+          
+          echo "Compiler $DIR downloaded successfully"
+        else
+          echo "Compiler $DIR already exists"
+        fi
     
-    - name: Build
+    - name: Build kernel
       run: |
+        export TERM=xterm
+        
         DEVICE=${{ github.event.inputs.device }}
         COMPILER=${{ github.event.inputs.compiler }}
         SELINUX=${{ github.event.inputs.selinux }}
         KSU=${{ github.event.inputs.ksu }}
         CLEAN=${{ github.event.inputs.clean_build }}
         
-        echo -e "$DEVICE\n$COMPILER\n$SELINUX\n$KSU\n$CLEAN" > input.txt
         echo "Build parameters:"
         echo "Device: $DEVICE"
         echo "Compiler: $COMPILER"
@@ -88,31 +172,56 @@ jobs:
         echo "KSU: $KSU"
         echo "Clean: $CLEAN"
         
-        # Show input file
-        echo "Input file contents:"
-        cat input.txt
+        # Create input file with all required answers
+        # The order is: target, compiler, selinux, ksu, clean
+        echo -e "$DEVICE\n$COMPILER\n$SELINUX\n$KSU\n$CLEAN" > input.txt
         
-        timeout 2400 ./apollo.sh < input.txt 2>&1 | tee build.log || true
+        echo "Running apollo.sh with input..."
+        # Use timeout to prevent hanging, capture all output
+        timeout 3600 bash -c '
+          set -e
+          # Run the script with pre-defined inputs
+          {
+            echo "$DEVICE"
+            echo "$COMPILER" 
+            echo "$SELINUX"
+            echo "$KSU"
+            echo "$CLEAN"
+            # Add extra newlines for any additional prompts
+            echo ""
+            echo ""
+            echo ""
+          } | ./apollo.sh 2>&1 | tee build.log
+        ' || true
+        
+        # Check if build was successful
+        if [ -f "build.log" ]; then
+          echo "=== Build Log Summary ==="
+          tail -100 build.log
+        fi
     
     - name: Collect artifacts
       run: |
         mkdir -p artifacts
         
-        # Collect kernel images
-        find arch/arm64/boot -name "Image*" -exec cp {} artifacts/ \; 2>/dev/null || true
-        find arch/arm64/boot -name "zImage*" -exec cp {} artifacts/ \; 2>/dev/null || true
+        # Collect any build outputs
+        find . -name "*.img" -type f -exec cp {} artifacts/ \; 2>/dev/null || true
+        find . -name "*.zip" -type f -exec cp {} artifacts/ \; 2>/dev/null || true
+        find arch/arm64/boot -name "Image*" -type f -exec cp {} artifacts/ \; 2>/dev/null || true
+        find arch/arm64/boot -name "zImage*" -type f -exec cp {} artifacts/ \; 2>/dev/null || true
+        find arch/arm64/boot -name "*.dtb" -type f -exec cp {} artifacts/ \; 2>/dev/null || true
+        find Apollo/Product -name "*" -type f -exec cp {} artifacts/ \; 2>/dev/null || true
+        find Apollo/Out -name "*" -type f -exec cp {} artifacts/ \; 2>/dev/null || true
         
-        # Collect boot images
-        find Apollo/Out -name "*.img" -exec cp {} artifacts/ \; 2>/dev/null || true
-        find Apollo/Product -name "*.img" -exec cp {} artifacts/ \; 2>/dev/null || true
-        
-        # Collect zip files
-        find Apollo/Product -name "*.zip" -exec cp {} artifacts/ \; 2>/dev/null || true
-        
-        # Collect build log
+        # Collect logs
         cp build.log artifacts/ 2>/dev/null || true
+        cp input.txt artifacts/ 2>/dev/null || true
         
-        # Create info file with build parameters
+        # List collected artifacts
+        echo "Collected artifacts:"
+        ls -la artifacts/ || true
+        
+        # Create info file
         echo "Build Parameters:" > artifacts/build_info.txt
         echo "Device: ${{ github.event.inputs.device }}" >> artifacts/build_info.txt
         echo "Compiler: ${{ github.event.inputs.compiler }}" >> artifacts/build_info.txt
@@ -120,6 +229,7 @@ jobs:
         echo "KernelSU: ${{ github.event.inputs.ksu }}" >> artifacts/build_info.txt
         echo "Clean Build: ${{ github.event.inputs.clean_build }}" >> artifacts/build_info.txt
         echo "Date: $(date)" >> artifacts/build_info.txt
+        echo "Workflow Run: https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" >> artifacts/build_info.txt
     
     - name: Upload artifacts
       uses: actions/upload-artifact@v4
