@@ -4,10 +4,30 @@ on:
   workflow_dispatch:
     inputs:
       device:
-        description: 'Device: 1=starlte (S9)'
+        description: 'Device: 1=starlte (S9), 2=star2lte (S9+), 3=crownlte (Note9), 4=starltekor, 5=star2ltekor, 6=crownltekor'
         default: '1'
         type: choice
         options: ['1', '2', '3', '4', '5', '6']
+      compiler:
+        description: 'Compiler choice (matches Apollo.sh options)'
+        default: '3'
+        type: choice
+        options: ['1', '2', '3', '4', '5', '6', '7', '8']
+      selinux:
+        description: 'SELinux mode'
+        default: '2'
+        type: choice
+        options: ['1', '2']
+      ksu:
+        description: 'Enable KernelSU'
+        default: 'y'
+        type: choice
+        options: ['y', 'n']
+      clean_build:
+        description: 'Clean build'
+        default: 'n'
+        type: choice
+        options: ['y', 'n']
 
 jobs:
   build:
@@ -23,42 +43,15 @@ jobs:
     - name: Install deps
       run: |
         sudo apt update
-        sudo apt install -y build-essential bc libssl-dev libncurses-dev libelf-dev flex bison git wget tar xz-utils python3 make gcc g++ cpio abootimg dos2unix
+        sudo apt install -y build-essential bc libssl-dev libncurses-dev libelf-dev flex bison git wget tar xz-utils python3 make gcc g++ cpio abootimg dos2unix zstd
     
     - name: Fix KernelSU
       run: |
-        # Lösche die Datei/Verzeichnis wenn es existiert, dann erstelle neu
         rm -rf drivers/kernelsu 2>/dev/null || true
         mkdir -p drivers/kernelsu
         echo 'config KSU' > drivers/kernelsu/Kconfig
         echo '	bool "KernelSU"' >> drivers/kernelsu/Kconfig
         echo '	default n' >> drivers/kernelsu/Kconfig
-    
-    - name: Download Clang
-      run: |
-        mkdir -p compiler
-        echo "Lade Clang von googlesource herunter..."
-        wget -q --tries=3 --timeout=60 --retry-connrefused \
-          "https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/llvm-r522817/clang-r522817.tar.gz" \
-          -O clang.tar.gz
-        
-        if [ ! -f "clang.tar.gz" ]; then
-          echo "FEHLER: Clang-Download fehlgeschlagen!"
-          exit 1
-        fi
-        
-        echo "Entpacke Clang..."
-        mkdir -p compiler/clang-18.0.1-r522817
-        tar -xzf clang.tar.gz -C compiler/clang-18.0.1-r522817
-        
-        # Prüfe, ob Entpacken erfolgreich war
-        if [ $? -eq 0 ]; then
-          echo "Clang erfolgreich entpackt"
-          rm clang.tar.gz
-        else
-          echo "FEHLER: Clang konnte nicht entpackt werden!"
-          exit 1
-        fi
     
     - name: Setup
       run: |
@@ -72,24 +65,65 @@ jobs:
     - name: Patch apollo.sh
       run: |
         sed -i 's|CR_TC=\.\./compiler|CR_TC=./compiler|g' apollo.sh
-        sed -i 's/read -p "Download Toolchain ? (y\/n) > " TC_DL/TC_DL="n"/' apollo.sh
-        sed -i 's/read -p "Enable KernelSU? (y\/n) > " CR_KSU/CR_KSU="n"/' apollo.sh
+        sed -i 's|CR_TC=../toolchain|CR_TC=./Apollo/toolchain|g' apollo.sh
+    
+    - name: Create compiler directories
+      run: |
+        mkdir -p compiler
+        mkdir -p Apollo/toolchain/clang-custom
     
     - name: Build
       run: |
-        echo -e "1\n3\n1\nn\ny" > input.txt
+        DEVICE=${{ github.event.inputs.device }}
+        COMPILER=${{ github.event.inputs.compiler }}
+        SELINUX=${{ github.event.inputs.selinux }}
+        KSU=${{ github.event.inputs.ksu }}
+        CLEAN=${{ github.event.inputs.clean_build }}
+        
+        echo -e "$DEVICE\n$COMPILER\n$SELINUX\n$KSU\n$CLEAN" > input.txt
+        echo "Build parameters:"
+        echo "Device: $DEVICE"
+        echo "Compiler: $COMPILER"
+        echo "SELinux: $SELINUX"
+        echo "KSU: $KSU"
+        echo "Clean: $CLEAN"
+        
+        # Show input file
+        echo "Input file contents:"
+        cat input.txt
+        
         timeout 2400 ./apollo.sh < input.txt 2>&1 | tee build.log || true
     
-    - name: Collect
+    - name: Collect artifacts
       run: |
         mkdir -p artifacts
+        
+        # Collect kernel images
         find arch/arm64/boot -name "Image*" -exec cp {} artifacts/ \; 2>/dev/null || true
         find arch/arm64/boot -name "zImage*" -exec cp {} artifacts/ \; 2>/dev/null || true
+        
+        # Collect boot images
+        find Apollo/Out -name "*.img" -exec cp {} artifacts/ \; 2>/dev/null || true
+        find Apollo/Product -name "*.img" -exec cp {} artifacts/ \; 2>/dev/null || true
+        
+        # Collect zip files
+        find Apollo/Product -name "*.zip" -exec cp {} artifacts/ \; 2>/dev/null || true
+        
+        # Collect build log
         cp build.log artifacts/ 2>/dev/null || true
+        
+        # Create info file with build parameters
+        echo "Build Parameters:" > artifacts/build_info.txt
+        echo "Device: ${{ github.event.inputs.device }}" >> artifacts/build_info.txt
+        echo "Compiler: ${{ github.event.inputs.compiler }}" >> artifacts/build_info.txt
+        echo "SELinux: ${{ github.event.inputs.selinux }}" >> artifacts/build_info.txt
+        echo "KernelSU: ${{ github.event.inputs.ksu }}" >> artifacts/build_info.txt
+        echo "Clean Build: ${{ github.event.inputs.clean_build }}" >> artifacts/build_info.txt
+        echo "Date: $(date)" >> artifacts/build_info.txt
     
-    - name: Upload
+    - name: Upload artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: kernel
+        name: kernel-build-${{ github.event.inputs.compiler }}-${{ github.event.inputs.device }}
         path: artifacts/
         if-no-files-found: warn
