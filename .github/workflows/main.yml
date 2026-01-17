@@ -90,43 +90,35 @@ jobs:
         mkdir -p Apollo/A.I.K/split_img
     
     - name: Pre-download compilers (QUIET version)
+      env:
+        COMPILER_NUM: ${{ github.event.inputs.compiler }}
       run: |
         echo "📥 Downloading compilers (quiet mode)..."
         
-        # Download only the selected compiler + 1 backup (much faster)
-        COMPILER_NUM=${{ github.event.inputs.compiler }}
-        
-        case "$COMPILER_NUM" in
-          1)
-            URL="https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/llvm-r416183/clang-r416183.tar.gz"
-            DIR="clang-12.0.4-r416183"
-            ;;
-          2)
-            URL="https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/llvm-r450784/clang-r450784b.tar.gz"
-            DIR="clang-14.0.4-r450784"
-            ;;
-          3)
-            URL="https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/llvm-r522817/clang-r522817.tar.gz"
-            DIR="clang-18.0.1-r522817"
-            ;;
-          4)
-            URL="https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/main/clang-r547379.tar.gz"
-            DIR="clang-20.0.0-r547379"
-            ;;
-          5)
-            URL="https://github.com/Neutron-Toolchains/clang-build-catalogue/releases/download/05012024/neutron-clang-05012024.tar.zst"
-            DIR="neutron-clang-18.0.0"
-            ;;
-          6)
-            URL="https://github.com/Neutron-Toolchains/clang-build-catalogue/releases/download/10032024/neutron-clang-10032024.tar.zst"
-            DIR="neutron-clang-19.0.0"
-            ;;
-          *)
-            # Default to compiler 3 if unknown
-            URL="https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/llvm-r522817/clang-r522817.tar.gz"
-            DIR="clang-18.0.1-r522817"
-            ;;
-        esac
+        # Set compiler URL based on selection
+        if [ "$COMPILER_NUM" = "1" ]; then
+          URL="https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/llvm-r416183/clang-r416183.tar.gz"
+          DIR="clang-12.0.4-r416183"
+        elif [ "$COMPILER_NUM" = "2" ]; then
+          URL="https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/llvm-r450784/clang-r450784b.tar.gz"
+          DIR="clang-14.0.4-r450784"
+        elif [ "$COMPILER_NUM" = "3" ]; then
+          URL="https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/llvm-r522817/clang-r522817.tar.gz"
+          DIR="clang-18.0.1-r522817"
+        elif [ "$COMPILER_NUM" = "4" ]; then
+          URL="https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/main/clang-r547379.tar.gz"
+          DIR="clang-20.0.0-r547379"
+        elif [ "$COMPILER_NUM" = "5" ]; then
+          URL="https://github.com/Neutron-Toolchains/clang-build-catalogue/releases/download/05012024/neutron-clang-05012024.tar.zst"
+          DIR="neutron-clang-18.0.0"
+        elif [ "$COMPILER_NUM" = "6" ]; then
+          URL="https://github.com/Neutron-Toolchains/clang-build-catalogue/releases/download/10032024/neutron-clang-10032024.tar.zst"
+          DIR="neutron-clang-19.0.0"
+        else
+          # Default to compiler 3 if unknown
+          URL="https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/llvm-r522817/clang-r522817.tar.gz"
+          DIR="clang-18.0.1-r522817"
+        fi
         
         echo "📦 Downloading $DIR..."
         
@@ -167,14 +159,14 @@ jobs:
         sed -i '2i\# Auto-set variables for GitHub Actions\nCR_TARGET=$1\nCR_COMPILER=$2\nCR_SELINUX=$3\nCR_KSU=$4\nCR_CLEAN=$5\nTC_DL="n"\n' apollo.sh
     
     - name: Build kernel (quiet)
+      env:
+        DEVICE: ${{ github.event.inputs.device }}
+        COMPILER: ${{ github.event.inputs.compiler }}
+        SELINUX: ${{ github.event.inputs.selinux }}
+        KSU: ${{ github.event.inputs.ksu }}
+        CLEAN: ${{ github.event.inputs.clean_build }}
       run: |
         export TERM=xterm
-        
-        DEVICE=${{ github.event.inputs.device }}
-        COMPILER=${{ github.event.inputs.compiler }}
-        SELINUX=${{ github.event.inputs.selinux }}
-        KSU=${{ github.event.inputs.ksu }}
-        CLEAN=${{ github.event.inputs.clean_build }}
         
         echo "🔨 Build Parameters:"
         echo "Device: $DEVICE"
@@ -195,7 +187,7 @@ jobs:
           EXIT_CODE=${PIPESTATUS[0]}
           echo "=== Build finished at $(date) ==="
           exit $EXIT_CODE
-        ' || BUILD_EXIT=$?
+        ' || true
         
         # Check result
         if [ -f "arch/arm64/boot/Image" ] || [ -f "arch/arm64/boot/Image.gz-dtb" ] || [ -f "arch/arm64/boot/zImage" ]; then
@@ -214,6 +206,12 @@ jobs:
     
     - name: Collect artifacts
       if: success()
+      env:
+        DEVICE: ${{ github.event.inputs.device }}
+        COMPILER: ${{ github.event.inputs.compiler }}
+        SELINUX: ${{ github.event.inputs.selinux }}
+        KSU: ${{ github.event.inputs.ksu }}
+        CLEAN: ${{ github.event.inputs.clean_build }}
       run: |
         mkdir -p artifacts
         
@@ -243,11 +241,11 @@ jobs:
         # Build info
         cat > artifacts/build_info.txt << EOF
 Build Parameters:
-Device: ${{ github.event.inputs.device }}
-Compiler: ${{ github.event.inputs.compiler }}
-SELinux: ${{ github.event.inputs.selinux }}
-KernelSU: ${{ github.event.inputs.ksu }}
-Clean Build: ${{ github.event.inputs.clean_build }}
+Device: $DEVICE
+Compiler: $COMPILER
+SELinux: $SELINUX
+KernelSU: $KSU
+Clean Build: $CLEAN
 Date: $(date)
 Workflow: $GITHUB_RUN_ID
 EOF
