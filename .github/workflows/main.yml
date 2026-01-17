@@ -4,12 +4,12 @@ on:
   workflow_dispatch:
     inputs:
       device:
-        description: 'Device (1-6)'
+        description: 'Device: 1=starlte (S9), 2=star2lte (S9+), 3=crownlte (Note9), 4=starltekor, 5=star2ltekor, 6=crownltekor'
         default: '1'
         type: choice
         options: ['1', '2', '3', '4', '5', '6']
       compiler:
-        description: 'Compiler (1-8)'
+        description: 'Compiler choice (1-8)'
         default: '3'
         type: choice
         options: ['1', '2', '3', '4', '5', '6', '7', '8']
@@ -37,9 +37,10 @@ jobs:
     - name: Checkout
       uses: actions/checkout@v4
       with:
+        submodules: false
         ref: 4.9.337-oneui
     
-    - name: Install dependencies
+    - name: Install deps
       run: |
         sudo apt update
         sudo apt install -y build-essential bc libssl-dev libncurses-dev libelf-dev flex bison git wget tar xz-utils python3 make gcc g++ cpio abootimg dos2unix zstd expect bsdiff
@@ -52,7 +53,7 @@ jobs:
         echo '	bool "KernelSU"' >> drivers/kernelsu/Kconfig
         echo '	default n' >> drivers/kernelsu/Kconfig
     
-    - name: Fix apollo.sh
+    - name: Fix Apollo.sh
       run: |
         # Simple fix for compiler 6 path
         sed -i 's/neutron-clang-18\.0\.0/neutron-clang-19.0.0/g' apollo.sh
@@ -79,44 +80,61 @@ jobs:
       run: |
         echo "Downloading compiler..."
         
-        # Simple download based on compiler number
+        # Get compiler from input
         COMPILER=${{ github.event.inputs.compiler }}
         
         if [ "$COMPILER" = "1" ]; then
           wget -q https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/llvm-r416183/clang-r416183.tar.gz -O /tmp/compiler.tar.gz
           tar -xzf /tmp/compiler.tar.gz -C compiler/
-          mv compiler/* compiler/clang-12.0.4-r416183
+          # Rename if needed
+          if [ -d "compiler/clang-r416183" ]; then
+            mv compiler/clang-r416183 compiler/clang-12.0.4-r416183 2>/dev/null || true
+          fi
         elif [ "$COMPILER" = "2" ]; then
           wget -q https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/llvm-r450784/clang-r450784b.tar.gz -O /tmp/compiler.tar.gz
           tar -xzf /tmp/compiler.tar.gz -C compiler/
-          mv compiler/* compiler/clang-14.0.4-r450784
+          if [ -d "compiler/clang-r450784b" ]; then
+            mv compiler/clang-r450784b compiler/clang-14.0.4-r450784 2>/dev/null || true
+          fi
         elif [ "$COMPILER" = "3" ]; then
           wget -q https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/llvm-r522817/clang-r522817.tar.gz -O /tmp/compiler.tar.gz
           tar -xzf /tmp/compiler.tar.gz -C compiler/
-          mv compiler/* compiler/clang-18.0.1-r522817
+          if [ -d "compiler/clang-r522817" ]; then
+            mv compiler/clang-r522817 compiler/clang-18.0.1-r522817 2>/dev/null || true
+          fi
         elif [ "$COMPILER" = "4" ]; then
           wget -q https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/main/clang-r547379.tar.gz -O /tmp/compiler.tar.gz
           tar -xzf /tmp/compiler.tar.gz -C compiler/
-          mv compiler/* compiler/clang-20.0.0-r547379
+          if [ -d "compiler/clang-r547379" ]; then
+            mv compiler/clang-r547379 compiler/clang-20.0.0-r547379 2>/dev/null || true
+          fi
         elif [ "$COMPILER" = "5" ]; then
           wget -q https://github.com/Neutron-Toolchains/clang-build-catalogue/releases/download/05012024/neutron-clang-05012024.tar.zst -O /tmp/compiler.tar.zst
           unzstd -q /tmp/compiler.tar.zst -o /tmp/compiler.tar
           tar -xf /tmp/compiler.tar -C compiler/
-          mv compiler/* compiler/neutron-clang-18.0.0
+          # Neutron creates its own directory, don't move it
+          if [ ! -d "compiler/neutron-clang-18.0.0" ] && [ -d "compiler/neutron-clang-05012024" ]; then
+            mv compiler/neutron-clang-05012024 compiler/neutron-clang-18.0.0 2>/dev/null || true
+          fi
         elif [ "$COMPILER" = "6" ]; then
           wget -q https://github.com/Neutron-Toolchains/clang-build-catalogue/releases/download/10032024/neutron-clang-10032024.tar.zst -O /tmp/compiler.tar.zst
           unzstd -q /tmp/compiler.tar.zst -o /tmp/compiler.tar
           tar -xf /tmp/compiler.tar -C compiler/
-          mv compiler/* compiler/neutron-clang-19.0.0
+          # Neutron creates its own directory, don't move it
+          if [ ! -d "compiler/neutron-clang-19.0.0" ] && [ -d "compiler/neutron-clang-10032024" ]; then
+            mv compiler/neutron-clang-10032024 compiler/neutron-clang-19.0.0 2>/dev/null || true
+          fi
         fi
         
-        rm -f /tmp/compiler.*
+        rm -f /tmp/compiler.* 2>/dev/null || true
         
         # Create dummy dirs for other compilers
-        mkdir -p compiler/neutron-clang-20.0.0/bin
-        mkdir -p Apollo/toolchain/clang-custom/bin
+        mkdir -p compiler/neutron-clang-20.0.0/bin 2>/dev/null || true
+        mkdir -p Apollo/toolchain/clang-custom/bin 2>/dev/null || true
+        
+        echo "Compiler setup complete"
     
-    - name: Patch apollo.sh
+    - name: Patch apollo.sh for automation
       run: |
         # Simple patches for automation
         sed -i 's|CR_TC=\.\./compiler|CR_TC=./compiler|g' apollo.sh
@@ -124,11 +142,11 @@ jobs:
         sed -i 's/read -p "Download Toolchain.*/TC_DL="n"/' apollo.sh
         
         # Remove interactive prompts
-        sed -i 's/read -p "Please select your build target.*/CR_TARGET=$1/' apollo.sh
-        sed -i 's/read -p "Please select your compiler.*/CR_COMPILER=$2/' apollo.sh
-        sed -i 's/read -p "Please select your SElinux mode.*/CR_SELINUX=$3/' apollo.sh
-        sed -i 's/read -p "Enable KernelSU.*/CR_KSU=$4/' apollo.sh
-        sed -i 's/read -p "Clean Builds.*/CR_CLEAN=$5/' apollo.sh
+        sed -i 's/read -p "Please select your build target.*/# CR_TARGET set by automation/' apollo.sh
+        sed -i 's/read -p "Please select your compiler.*/# CR_COMPILER set by automation/' apollo.sh
+        sed -i 's/read -p "Please select your SElinux mode.*/# CR_SELINUX set by automation/' apollo.sh
+        sed -i 's/read -p "Enable KernelSU.*/# CR_KSU set by automation/' apollo.sh
+        sed -i 's/read -p "Clean Builds.*/# CR_CLEAN set by automation/' apollo.sh
     
     - name: Build kernel
       run: |
@@ -150,16 +168,17 @@ jobs:
         
         echo "Starting build..."
         
-        # Run build
+        # Run build with timeout
         timeout 1800 bash -c 'cat input.txt | ./apollo.sh 2>&1 | tee build_output.log'
         
         # Check result
-        if [ -f "arch/arm64/boot/Image" ] || [ -f "arch/arm64/boot/Image.gz-dtb" ]; then
+        if [ -f "arch/arm64/boot/Image" ] || [ -f "arch/arm64/boot/Image.gz-dtb" ] || [ -f "arch/arm64/boot/zImage" ]; then
           echo "Build successful!"
+          ls -la arch/arm64/boot/ 2>/dev/null || true
         else
           echo "Build failed!"
           echo "=== Last 50 lines of build log ==="
-          tail -50 build_output.log
+          tail -50 build_output.log 2>/dev/null || echo "No build log found"
           exit 1
         fi
     
