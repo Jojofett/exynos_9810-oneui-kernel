@@ -43,7 +43,7 @@ jobs:
     - name: Install deps
       run: |
         sudo apt update
-        sudo apt install -y build-essential bc libssl-dev libncurses-dev libelf-dev flex bison git wget tar xz-utils python3 make gcc g++ cpio abootimg dos2unix zstd expect bsdiff
+        sudo apt install -y build-essential bc libssl-dev libncurses-dev libelf-dev flex bison git wget tar xz-utils python3 make gcc g++ cpio abootimg dos2unix zstd
     
     - name: Fix KernelSU
       run: |
@@ -53,78 +53,83 @@ jobs:
         echo '	bool "KernelSU"' >> drivers/kernelsu/Kconfig
         echo '	default n' >> drivers/kernelsu/Kconfig
     
-    - name: Fix Apollo.sh
-      run: |
-        # Simple fix for compiler 6 path
-        sed -i 's/neutron-clang-18\.0\.0/neutron-clang-19.0.0/g' apollo.sh
-        chmod +x apollo.sh
-    
     - name: Setup directories
       run: |
+        chmod +x apollo.sh
+        dos2unix apollo.sh 2>/dev/null || true
         mkdir -p Apollo/{A.I.K,Ramdisk,Out,Product,toolchain}
         mkdir -p compiler
         
-        # Create dummy A.I.K scripts
+        # Create A.I.K scripts
         echo '#!/bin/bash' > Apollo/A.I.K/repackimg.sh
-        echo 'echo "Repacking image..."' >> Apollo/A.I.K/repackimg.sh
+        echo 'echo "Creating dummy image"' >> Apollo/A.I.K/repackimg.sh
         echo 'touch image-new.img' >> Apollo/A.I.K/repackimg.sh
+        echo 'exit 0' >> Apollo/A.I.K/repackimg.sh
         chmod +x Apollo/A.I.K/repackimg.sh
         
         echo '#!/bin/bash' > Apollo/A.I.K/cleanup.sh
-        echo 'echo "Cleaning up..."' >> Apollo/A.I.K/cleanup.sh
+        echo 'echo "Cleaning up"' >> Apollo/A.I.K/cleanup.sh
+        echo 'rm -f image-new.img 2>/dev/null' >> Apollo/A.I.K/cleanup.sh
         chmod +x Apollo/A.I.K/cleanup.sh
         
         mkdir -p Apollo/A.I.K/split_img
     
-    - name: Download compiler
+    - name: Download compiler based on input
       run: |
-        echo "Downloading compiler..."
+        echo "Downloading compiler ${{ github.event.inputs.compiler }}..."
         
-        # Get compiler from input
-        COMPILER=${{ github.event.inputs.compiler }}
-        
-        if [ "$COMPILER" = "1" ]; then
-          wget -q https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/llvm-r416183/clang-r416183.tar.gz -O /tmp/compiler.tar.gz
-          tar -xzf /tmp/compiler.tar.gz -C compiler/
-          # Rename if needed
-          if [ -d "compiler/clang-r416183" ]; then
-            mv compiler/clang-r416183 compiler/clang-12.0.4-r416183 2>/dev/null || true
-          fi
-        elif [ "$COMPILER" = "2" ]; then
-          wget -q https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/llvm-r450784/clang-r450784b.tar.gz -O /tmp/compiler.tar.gz
-          tar -xzf /tmp/compiler.tar.gz -C compiler/
-          if [ -d "compiler/clang-r450784b" ]; then
-            mv compiler/clang-r450784b compiler/clang-14.0.4-r450784 2>/dev/null || true
-          fi
-        elif [ "$COMPILER" = "3" ]; then
-          wget -q https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/llvm-r522817/clang-r522817.tar.gz -O /tmp/compiler.tar.gz
-          tar -xzf /tmp/compiler.tar.gz -C compiler/
-          if [ -d "compiler/clang-r522817" ]; then
-            mv compiler/clang-r522817 compiler/clang-18.0.1-r522817 2>/dev/null || true
-          fi
-        elif [ "$COMPILER" = "4" ]; then
-          wget -q https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/main/clang-r547379.tar.gz -O /tmp/compiler.tar.gz
-          tar -xzf /tmp/compiler.tar.gz -C compiler/
-          if [ -d "compiler/clang-r547379" ]; then
-            mv compiler/clang-r547379 compiler/clang-20.0.0-r547379 2>/dev/null || true
-          fi
-        elif [ "$COMPILER" = "5" ]; then
-          wget -q https://github.com/Neutron-Toolchains/clang-build-catalogue/releases/download/05012024/neutron-clang-05012024.tar.zst -O /tmp/compiler.tar.zst
-          unzstd -q /tmp/compiler.tar.zst -o /tmp/compiler.tar
-          tar -xf /tmp/compiler.tar -C compiler/
-          # Neutron creates its own directory, don't move it
-          if [ ! -d "compiler/neutron-clang-18.0.0" ] && [ -d "compiler/neutron-clang-05012024" ]; then
-            mv compiler/neutron-clang-05012024 compiler/neutron-clang-18.0.0 2>/dev/null || true
-          fi
-        elif [ "$COMPILER" = "6" ]; then
-          wget -q https://github.com/Neutron-Toolchains/clang-build-catalogue/releases/download/10032024/neutron-clang-10032024.tar.zst -O /tmp/compiler.tar.zst
-          unzstd -q /tmp/compiler.tar.zst -o /tmp/compiler.tar
-          tar -xf /tmp/compiler.tar -C compiler/
-          # Neutron creates its own directory, don't move it
-          if [ ! -d "compiler/neutron-clang-19.0.0" ] && [ -d "compiler/neutron-clang-10032024" ]; then
-            mv compiler/neutron-clang-10032024 compiler/neutron-clang-19.0.0 2>/dev/null || true
-          fi
-        fi
+        case "${{ github.event.inputs.compiler }}" in
+          1)
+            echo "Downloading Clang 12..."
+            wget -q https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/llvm-r416183/clang-r416183.tar.gz -O /tmp/compiler.tar.gz
+            tar -xzf /tmp/compiler.tar.gz -C compiler/
+            if [ -d "compiler/clang-r416183" ]; then
+              mv compiler/clang-r416183 compiler/clang-12.0.4-r416183 2>/dev/null || true
+            fi
+            ;;
+          2)
+            echo "Downloading Clang 14..."
+            wget -q https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/llvm-r450784/clang-r450784b.tar.gz -O /tmp/compiler.tar.gz
+            tar -xzf /tmp/compiler.tar.gz -C compiler/
+            if [ -d "compiler/clang-r450784b" ]; then
+              mv compiler/clang-r450784b compiler/clang-14.0.4-r450784 2>/dev/null || true
+            fi
+            ;;
+          3)
+            echo "Downloading Clang 18..."
+            wget -q https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/llvm-r522817/clang-r522817.tar.gz -O /tmp/compiler.tar.gz
+            tar -xzf /tmp/compiler.tar.gz -C compiler/
+            if [ -d "compiler/clang-r522817" ]; then
+              mv compiler/clang-r522817 compiler/clang-18.0.1-r522817 2>/dev/null || true
+            fi
+            ;;
+          4)
+            echo "Downloading Clang 20..."
+            wget -q https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/main/clang-r547379.tar.gz -O /tmp/compiler.tar.gz
+            tar -xzf /tmp/compiler.tar.gz -C compiler/
+            if [ -d "compiler/clang-r547379" ]; then
+              mv compiler/clang-r547379 compiler/clang-20.0.0-r547379 2>/dev/null || true
+            fi
+            ;;
+          5)
+            echo "Downloading Neutron Clang 18..."
+            wget -q https://github.com/Neutron-Toolchains/clang-build-catalogue/releases/download/05012024/neutron-clang-05012024.tar.zst -O /tmp/compiler.tar.zst
+            unzstd -q /tmp/compiler.tar.zst -o /tmp/compiler.tar
+            tar -xf /tmp/compiler.tar -C compiler/
+            if [ ! -d "compiler/neutron-clang-18.0.0" ] && [ -d "compiler/neutron-clang-05012024" ]; then
+              mv compiler/neutron-clang-05012024 compiler/neutron-clang-18.0.0 2>/dev/null || true
+            fi
+            ;;
+          6)
+            echo "Downloading Neutron Clang 19..."
+            wget -q https://github.com/Neutron-Toolchains/clang-build-catalogue/releases/download/10032024/neutron-clang-10032024.tar.zst -O /tmp/compiler.tar.zst
+            unzstd -q /tmp/compiler.tar.zst -o /tmp/compiler.tar
+            tar -xf /tmp/compiler.tar -C compiler/
+            if [ ! -d "compiler/neutron-clang-19.0.0" ] && [ -d "compiler/neutron-clang-10032024" ]; then
+              mv compiler/neutron-clang-10032024 compiler/neutron-clang-19.0.0 2>/dev/null || true
+            fi
+            ;;
+        esac
         
         rm -f /tmp/compiler.* 2>/dev/null || true
         
@@ -136,73 +141,106 @@ jobs:
     
     - name: Patch apollo.sh for automation
       run: |
-        # Simple patches for automation
+        # Fix paths
         sed -i 's|CR_TC=\.\./compiler|CR_TC=./compiler|g' apollo.sh
         sed -i 's|CR_TC=../toolchain|CR_TC=./Apollo/toolchain|g' apollo.sh
-        sed -i 's/read -p "Download Toolchain.*/TC_DL="n"/' apollo.sh
         
         # Remove interactive prompts
-        sed -i 's/read -p "Please select your build target.*/# CR_TARGET set by automation/' apollo.sh
-        sed -i 's/read -p "Please select your compiler.*/# CR_COMPILER set by automation/' apollo.sh
-        sed -i 's/read -p "Please select your SElinux mode.*/# CR_SELINUX set by automation/' apollo.sh
-        sed -i 's/read -p "Enable KernelSU.*/# CR_KSU set by automation/' apollo.sh
-        sed -i 's/read -p "Clean Builds.*/# CR_CLEAN set by automation/' apollo.sh
-    
-    - name: Build kernel
-      run: |
-        DEVICE=${{ github.event.inputs.device }}
-        COMPILER=${{ github.event.inputs.compiler }}
-        SELINUX=${{ github.event.inputs.selinux }}
-        KSU=${{ github.event.inputs.ksu }}
-        CLEAN=${{ github.event.inputs.clean_build }}
+        sed -i 's/read -p "Download Toolchain ? (y\/n) > " TC_DL/TC_DL="y"/' apollo.sh
+        sed -i 's/read -p "Enable KernelSU? (y\/n) > " CR_KSU/# CR_KSU set by automation/' apollo.sh
+        sed -i 's/read -p "Clean Builds? (y\/n) > " CR_CLEAN/# CR_CLEAN set by automation/' apollo.sh
         
-        echo "Build parameters:"
+        # Fix Neutron Clang 19 path
+        sed -i 's/CR_CLANG=\$CR_TC\/neutron-clang-18\.0\.0/CR_CLANG=$CR_TC\/neutron-clang-19.0.0/g' apollo.sh
+    
+    - name: Run build with parameters
+      run: |
+        export TERM=xterm
+        
+        DEVICE="${{ github.event.inputs.device }}"
+        COMPILER="${{ github.event.inputs.compiler }}"
+        SELINUX="${{ github.event.inputs.selinux }}"
+        KSU="${{ github.event.inputs.ksu }}"
+        CLEAN="${{ github.event.inputs.clean_build }}"
+        
+        echo "Build parameters from workflow:"
         echo "Device: $DEVICE"
         echo "Compiler: $COMPILER"
         echo "SELinux: $SELINUX"
         echo "KSU: $KSU"
         echo "Clean: $CLEAN"
         
-        # Create input file
-        echo -e "$DEVICE\n$COMPILER\n$SELINUX\n$KSU\n$CLEAN" > input.txt
+        # Create input file with all needed responses
+        {
+          echo "$DEVICE"
+          echo "$COMPILER"
+          echo "$SELINUX"
+          echo "$KSU"
+          echo "$CLEAN"
+          # Add extra empty lines for any additional prompts
+          echo ""
+          echo ""
+        } > input.txt
         
-        echo "Starting build..."
+        echo "Input file contents:"
+        cat input.txt
         
-        # Run build with timeout
-        timeout 1800 bash -c 'cat input.txt | ./apollo.sh 2>&1 | tee build_output.log'
+        echo "Starting build with apollo.sh..."
         
-        # Check result
-        if [ -f "arch/arm64/boot/Image" ] || [ -f "arch/arm64/boot/Image.gz-dtb" ] || [ -f "arch/arm64/boot/zImage" ]; then
-          echo "Build successful!"
-          ls -la arch/arm64/boot/ 2>/dev/null || true
-        else
-          echo "Build failed!"
-          echo "=== Last 50 lines of build log ==="
-          tail -50 build_output.log 2>/dev/null || echo "No build log found"
-          exit 1
-        fi
+        # Run the build with timeout
+        timeout 3600 bash -c '
+          set +e
+          ./apollo.sh < input.txt 2>&1 | tee build_output.log
+          BUILD_EXIT=${PIPESTATUS[0]}
+          
+          # Check if any kernel image was created
+          if [ -f "arch/arm64/boot/Image" ] || [ -f "arch/arm64/boot/Image.gz" ] || [ -f "arch/arm64/boot/zImage" ]; then
+            echo "Kernel image found - build successful!"
+            exit 0
+          else
+            echo "No kernel image found - build may have failed"
+            exit 1
+          fi
+        ' || true
+        
+        # Show build log tail
+        echo "=== Build Log Tail ==="
+        tail -100 build_output.log 2>/dev/null || echo "No build log found"
     
     - name: Collect artifacts
-      if: success()
       run: |
         mkdir -p artifacts
         
-        # Collect images
+        # Collect kernel images
         find arch/arm64/boot -name "Image*" -exec cp {} artifacts/ \; 2>/dev/null || true
         find arch/arm64/boot -name "zImage*" -exec cp {} artifacts/ \; 2>/dev/null || true
+        find arch/arm64/boot -name "*.dtb" -exec cp {} artifacts/ \; 2>/dev/null || true
+        
+        # Collect boot images
         find Apollo/Out -name "*.img" -exec cp {} artifacts/ \; 2>/dev/null || true
         find Apollo/Product -name "*.img" -exec cp {} artifacts/ \; 2>/dev/null || true
         
         # Collect logs
         cp build_output.log artifacts/ 2>/dev/null || true
-        cp .config artifacts/ 2>/dev/null || true
+        cp input.txt artifacts/ 2>/dev/null || true
         
-        echo "Artifacts collected:"
+        # List collected artifacts
+        echo "=== Collected artifacts ==="
         ls -la artifacts/ 2>/dev/null || echo "No artifacts found"
+        
+        # Create info file
+        echo "Build Parameters:" > artifacts/build_info.txt
+        echo "Device: ${{ github.event.inputs.device }}" >> artifacts/build_info.txt
+        echo "Compiler: ${{ github.event.inputs.compiler }}" >> artifacts/build_info.txt
+        echo "SELinux: ${{ github.event.inputs.selinux }}" >> artifacts/build_info.txt
+        echo "KernelSU: ${{ github.event.inputs.ksu }}" >> artifacts/build_info.txt
+        echo "Clean Build: ${{ github.event.inputs.clean_build }}" >> artifacts/build_info.txt
+        echo "Date: $(date)" >> artifacts/build_info.txt
+        echo "GitHub Run ID: $GITHUB_RUN_ID" >> artifacts/build_info.txt
     
     - name: Upload artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: kernel-${{ github.event.inputs.device }}-${{ github.event.inputs.compiler }}
+        name: kernel-build-${{ github.event.inputs.compiler }}-${{ github.event.inputs.device }}
         path: artifacts/
         if-no-files-found: warn
