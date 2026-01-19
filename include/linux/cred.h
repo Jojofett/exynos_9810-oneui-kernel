@@ -143,6 +143,12 @@ struct cred {
 #endif
 	struct user_struct *user;	/* real user ID subscription */
 	struct user_namespace *user_ns; /* user_ns the caps and keyrings are relative to. */
+#ifdef CONFIG_RKP_CRED_PROT
+    void *bp_pgd;
+    void *bp_task;
+    unsigned int type;
+    atomic_t use_cnt;
+#endif
 	struct group_info *group_info;	/* supplementary groups for euid/fsgid */
 	/* RCU deletion */
 	union {
