@@ -641,11 +641,26 @@ void kdp_init(void)
 	kdp_init_t cred;
 
 	cred.credSize 	= sizeof(struct cred);
-	cred.sp_size	= rkp_get_task_sec_size();
-	cred.pgd_mm 	= offsetof(struct mm_struct,pgd);
-	cred.uid_cred	= offsetof(struct cred,uid);
-	cred.euid_cred	= offsetof(struct cred,euid);
-	cred.gid_cred	= offsetof(struct cred,gid);
+cred.bp_pgd_cred        = 0;
+cred.bp_task_cred       = 0;
+cred.type_cred          = 0;
+cred.usage_cred         = 0;
+cred.bp_pgd_cred        = 0;
+cred.bp_task_cred       = 0;
+cred.type_cred          = 0;
+cred.usage_cred         = 0;
+cred.bp_pgd_cred        = 0;
+cred.bp_task_cred       = 0;
+cred.type_cred          = 0;
+cred.usage_cred         = 0;
+cred.bp_pgd_cred        = 0;
+cred.bp_task_cred       = 0;
+cred.type_cred          = 0;
+cred.usage_cred         = 0;
+cred.bp_pgd_cred        = 0;
+cred.bp_task_cred       = 0;
+cred.type_cred          = 0;
+cred.usage_cred         = 0;
 	cred.egid_cred	= offsetof(struct cred,egid);
 
 	cred.bp_pgd_cred 	= offsetof(struct cred,bp_pgd);
