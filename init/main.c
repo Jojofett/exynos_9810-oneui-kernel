@@ -441,11 +441,18 @@ static void __init setup_command_line(char *command_line)
  *
  * gcc-3.4 accidentally inlines this function, so use noinline.
  */
+#ifdef CONFIG_RKP_KDP
+	/* RKP credits */
+	struct cred_offset cred = {0,};
 
-static __initdata DECLARE_COMPLETION(kthreadd_done);
-
-static noinline void __ref rest_init(void)
-{
+	// Use the actual fields that exist or provide defaults
+	cred.bp_pgd_cred        = 0;  // rkp_get_offset_bp_cred() might be needed
+	cred.bp_task_cred       = 0;
+	cred.type_cred          = offsetof(struct cred_param, type);
+	cred.usage_cred         = offsetof(struct cred_param, use_cnt_ptr);
+	printk(KERN_INFO"cred_offset (adjusted):%x,%x,%x,%x\n",
+		cred.bp_pgd_cred, cred.bp_task_cred, cred.type_cred, cred.usage_cred);
+#endif
 	int pid;
 
 	rcu_scheduler_starting();
