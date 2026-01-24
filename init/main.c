@@ -441,18 +441,11 @@ static void __init setup_command_line(char *command_line)
  *
  * gcc-3.4 accidentally inlines this function, so use noinline.
  */
-#ifdef CONFIG_RKP_KDP
-	/* RKP credits */
-	struct cred_offset cred = {0,};
 
-	// Use the actual fields that exist or provide defaults
-	cred.bp_pgd_cred        = 0;  // rkp_get_offset_bp_cred() might be needed
-	cred.bp_task_cred       = 0;
-	cred.type_cred          = offsetof(struct cred_param, type);
-	cred.usage_cred         = offsetof(struct cred_param, use_cnt_ptr);
-	printk(KERN_INFO"cred_offset (adjusted):%x,%x,%x,%x\n",
-		cred.bp_pgd_cred, cred.bp_task_cred, cred.type_cred, cred.usage_cred);
-#endif
+static __initdata DECLARE_COMPLETION(kthreadd_done);
+
+static noinline void __ref rest_init(void)
+{
 	int pid;
 
 	rcu_scheduler_starting();
@@ -641,33 +634,18 @@ void kdp_init(void)
 	kdp_init_t cred;
 
 	cred.credSize 	= sizeof(struct cred);
-cred.bp_pgd_cred        = 0;
-cred.bp_task_cred       = 0;
-cred.type_cred          = 0;
-cred.usage_cred         = 0;
-cred.bp_pgd_cred        = 0;
-cred.bp_task_cred       = 0;
-cred.type_cred          = 0;
-cred.usage_cred         = 0;
-cred.bp_pgd_cred        = 0;
-cred.bp_task_cred       = 0;
-cred.type_cred          = 0;
-cred.usage_cred         = 0;
-cred.bp_pgd_cred        = 0;
-cred.bp_task_cred       = 0;
-cred.type_cred          = 0;
-cred.usage_cred         = 0;
-cred.bp_pgd_cred        = 0;
-cred.bp_task_cred       = 0;
-cred.type_cred          = 0;
-cred.usage_cred         = 0;
+	cred.sp_size	= rkp_get_task_sec_size();
+	cred.pgd_mm 	= offsetof(struct mm_struct,pgd);
+	cred.uid_cred	= offsetof(struct cred,uid);
+	cred.euid_cred	= offsetof(struct cred,euid);
+	cred.gid_cred	= offsetof(struct cred,gid);
 	cred.egid_cred	= offsetof(struct cred,egid);
 
-	cred.bp_pgd_cred 	= offsetof(struct cred,bp_pgd);
-	cred.bp_task_cred 	= offsetof(struct cred,bp_task);
-	cred.type_cred 		= offsetof(struct cred,type);
+	cred.bp_pgd_cred 	= = 0;
+	cred.bp_task_cred 	= = 0;
+	cred.type_cred 		= = 0;
 	cred.security_cred 	= offsetof(struct cred,security);
-	cred.usage_cred 	= offsetof(struct cred,use_cnt);
+	cred.usage_cred 	= = 0;
 
 	cred.cred_task  	= offsetof(struct task_struct,cred);
 	cred.mm_task 		= offsetof(struct task_struct,mm);
