@@ -81,7 +81,6 @@ extern u8 __rkp_end_prot_page[];
 typedef struct rkp_init rkp_init_t;
 extern u8 rkp_started;
 void *rkp_ro_alloc(void);
-oid *rkp_ro_alloc_phys(void);
 void *rkp_ro_alloc_phys(void);
 void rkp_ro_free(void *free_addr);
 unsigned int is_rkp_ro_page(u64 addr);
