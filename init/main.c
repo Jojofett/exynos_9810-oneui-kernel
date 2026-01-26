@@ -641,11 +641,11 @@ void kdp_init(void)
 	cred.gid_cred	= offsetof(struct cred,gid);
 	cred.egid_cred	= offsetof(struct cred,egid);
 
-	cred.bp_pgd_cred 	= = 0;
-	cred.bp_task_cred 	= = 0;
-	cred.type_cred 		= = 0;
+	cred.bp_pgd_cred 	=  0;
+	cred.bp_task_cred 	=  0;
+	cred.type_cred 		=  0;
 	cred.security_cred 	= offsetof(struct cred,security);
-	cred.usage_cred 	= = 0;
+	cred.usage_cred 	=  0;
 
 	cred.cred_task  	= offsetof(struct task_struct,cred);
 	cred.mm_task 		= offsetof(struct task_struct,mm);
